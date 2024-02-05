@@ -1,46 +1,56 @@
 use egui::*;
 
+use crate::generator::{Generator, Message};
+
 const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
 const ROUNDING: f32 = 8.0;
 
-#[derive(serde::Deserialize, serde::Serialize, Debug)]
-#[serde(default)]
+#[derive(Debug)]
 pub struct App {
     prompt: String,
     prompt_id: Id,
-    history: Vec<Prompt>,
+    history: History,
+    generator: Generator,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Default, Debug)]
+#[serde(default)]
+struct History {
+    prompts: Vec<Prompt>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 struct Prompt {
     prompt: String,
-    reply: Option<String>,
-}
-
-impl Default for App {
-    fn default() -> Self {
-        Self {
-            prompt_id: Id::new("prompt-id"),
-            prompt: Default::default(),
-            history: Default::default(),
-        }
-    }
+    reply: String,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        if let Some(storage) = cc.storage {
+        // let model = generator::Generator::new(None, None, 1.1, 64).unwrap();
+
+        let history = if let Some(storage) = cc.storage {
             // Load previous app state (if any).
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         } else {
             Default::default()
+        };
+
+        Self {
+            prompt_id: Id::new("prompt-id"),
+            prompt: Default::default(),
+            history,
+            generator: Generator::new(Default::default()),
         }
     }
 
     fn send_prompt(&mut self) {
         let prompt = self.prompt.trim().to_owned();
-        let reply = Some(format!("{prompt} {prompt}"));
-        self.history.push(Prompt { prompt, reply });
+        self.generator.send_prompt(&prompt);
+        self.history.prompts.push(Prompt {
+            prompt,
+            reply: Default::default(),
+        });
 
         self.prompt.clear();
     }
@@ -49,18 +59,28 @@ impl App {
 impl eframe::App for App {
     /// Called by the framework to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, self);
+        eframe::set_value(storage, eframe::APP_KEY, &self.history);
     }
 
     /// Handle input and repaint screen.
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        match self.generator.next_message() {
+            Some(Message::Token(s)) => {
+                if let Some(prompt) = self.history.prompts.last_mut() {
+                    prompt.reply.push_str(&s);
+                }
+            }
+            Some(Message::Error(s)) => todo!(),
+            None => (),
+        };
+
         ctx.memory_mut(|m| m.request_focus(self.prompt_id));
 
         TopBottomPanel::top("top_panel").show(ctx, |ui| {
             menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Quit").clicked() {
-                        ctx.send_viewport_cmd(ViewportCommand::Close);
+                ui.menu_button("Edit", |ui| {
+                    if ui.button("Clear history").clicked() {
+                        self.history.prompts.clear();
                     }
                 });
             });
@@ -102,10 +122,10 @@ impl eframe::App for App {
                 .auto_shrink(false)
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    for prompt in &self.history {
+                    for prompt in &self.history.prompts {
                         ui.add(Bubble::new(&prompt.prompt, BubbleContent::Prompt));
-                        if let Some(reply) = &prompt.reply {
-                            ui.add(Bubble::new(reply, BubbleContent::Reply));
+                        if !prompt.reply.is_empty() {
+                            ui.add(Bubble::new(&prompt.reply, BubbleContent::Reply));
                             ui.add_space(ui.spacing().item_spacing.y * 2.0);
                         }
                     }
@@ -115,6 +135,10 @@ impl eframe::App for App {
 
         // Run 20 frames per second.
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.generator.shutdown();
     }
 }
 
