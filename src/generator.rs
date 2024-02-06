@@ -148,8 +148,6 @@ fn generator(config: Config, command_rx: Receiver<Command>, message_tx: Sender<M
                             tokens.push(token);
                             if let Ok(Some(token_str)) = tokenizer.next_token(token) {
                                 let _ = message_tx.send(Message::Token(token_str));
-                            } else {
-                                break;
                             }
                         }
                         Err(err) => {
