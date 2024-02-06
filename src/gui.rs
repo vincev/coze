@@ -45,12 +45,14 @@ impl App {
     }
 
     fn send_prompt(&mut self) {
-        let prompt = self.prompt.trim().to_owned();
-        self.generator.send_prompt(&prompt);
-        self.history.prompts.push(Prompt {
-            prompt,
-            reply: Default::default(),
-        });
+        let prompt = self.prompt.trim();
+        if !prompt.is_empty() {
+            self.generator.send_prompt(prompt);
+            self.history.prompts.push(Prompt {
+                prompt: prompt.to_owned(),
+                reply: Default::default(),
+            });
+        }
 
         self.prompt.clear();
     }
@@ -81,6 +83,7 @@ impl eframe::App for App {
                 ui.menu_button("Edit", |ui| {
                     if ui.button("Clear history").clicked() {
                         self.history.prompts.clear();
+                        ui.close_menu();
                     }
                 });
             });
