@@ -7,7 +7,7 @@ use candle_transformers::{
 };
 use std::sync::Arc;
 
-static WEIGHTS: &[u8] = include_bytes!("stablelm-2-zephyr-1_6b-Q4_1.gguf");
+static WEIGHTS: &[u8] = include_bytes!("../../model/stablelm-2-zephyr-1_6b-Q4_1.gguf");
 static CONFIG: &str = include_str!("model_config.json");
 
 #[derive(Debug)]
@@ -56,7 +56,7 @@ pub struct Config {
     pub norm_eps: f64,
     pub use_cache: bool,
     #[serde(default)]
-    pub(crate) use_qkv_bias: bool, // Used in StableLM-2
+    pub use_qkv_bias: bool,
 }
 
 impl Config {
