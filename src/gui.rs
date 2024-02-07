@@ -11,6 +11,7 @@ pub struct App {
     prompt_id: Id,
     history: Vec<Prompt>,
     generator: Generator,
+    error: Option<String>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
@@ -35,6 +36,7 @@ impl App {
             prompt: Default::default(),
             history,
             generator: Generator::new(Default::default()),
+            error: None,
         }
     }
 
@@ -69,7 +71,9 @@ impl eframe::App for App {
                     scroll_to_bottom = true;
                 }
             }
-            Some(Message::Error(s)) => {}
+            Some(Message::Error(msg)) => {
+                self.error = Some(msg);
+            }
             None => (),
         };
 
@@ -153,6 +157,24 @@ impl eframe::App for App {
             ui.allocate_space(ui.available_size());
         });
 
+        // Show error window if any.
+        if self.error.is_some() {
+            egui::Window::new("Error")
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                        let msg = self.error.as_ref().unwrap();
+                        ui.label(RichText::new(msg).font(TEXT_FONT));
+                        ui.add_space(ui.spacing().item_spacing.y * 2.5);
+                        if ui.button("Close").clicked() {
+                            self.error = None;
+                        }
+                    });
+                });
+        }
+
         // Run 20 frames per second.
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
@@ -177,6 +199,20 @@ impl Bubble {
         let text = WidgetText::from(RichText::new(text).font(TEXT_FONT).monospace());
         Self { text, content }
     }
+
+    fn fill_color(content: &BubbleContent) -> Color32 {
+        match content {
+            BubbleContent::Prompt => Color32::from_rgb(15, 85, 235),
+            BubbleContent::Reply => Color32::from_gray(230),
+        }
+    }
+
+    fn text_color(content: &BubbleContent) -> Color32 {
+        match content {
+            BubbleContent::Prompt => Color32::from_rgb(210, 225, 250),
+            BubbleContent::Reply => Color32::from_gray(55),
+        }
+    }
 }
 
 impl Widget for Bubble {
@@ -184,10 +220,7 @@ impl Widget for Bubble {
         const PADDING: f32 = 10.0;
         const WIDTH_PCT: f32 = 0.80;
 
-        let Bubble {
-            text,
-            content: bubble_type,
-        } = self;
+        let Bubble { text, content } = self;
 
         let text_wrap_width = ui.available_width() * WIDTH_PCT - 2.0 * PADDING;
         let galley = text.into_galley(ui, Some(true), text_wrap_width, TextStyle::Monospace);
@@ -197,7 +230,7 @@ impl Widget for Bubble {
         let (rect, response) = ui.allocate_at_least(desired_size, Sense::click());
 
         let dx = ui.available_width() - bubble_size.x;
-        let paint_rect = if matches!(bubble_type, BubbleContent::Prompt) {
+        let paint_rect = if matches!(content, BubbleContent::Prompt) {
             // Move prompt to the right
             Rect::from_min_max(Pos2::new(rect.min.x + dx, rect.min.y), rect.max)
         } else {
@@ -205,11 +238,8 @@ impl Widget for Bubble {
         };
 
         if ui.is_rect_visible(rect) {
-            let fill_color = if matches!(bubble_type, BubbleContent::Prompt) {
-                Color32::from_rgb(15, 85, 235)
-            } else {
-                Color32::from_gray(230)
-            };
+            let fill_color = Self::fill_color(&content);
+            let text_color = Self::text_color(&content);
 
             // On click expand animation.
             let expand = ui
@@ -223,12 +253,6 @@ impl Widget for Bubble {
                 ui.ctx().clear_animations();
                 ui.ctx().animate_value_with_time(response.id, 0.0, 0.5);
             }
-
-            let text_color = if matches!(bubble_type, BubbleContent::Prompt) {
-                Color32::from_rgb(210, 225, 250)
-            } else {
-                Color32::from_gray(55)
-            };
 
             ui.painter().rect(
                 paint_rect,
