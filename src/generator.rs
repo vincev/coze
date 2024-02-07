@@ -1,8 +1,9 @@
 use anyhow::Result;
 use candle::{DType, Device, Tensor};
-use candle_transformers::generation::LogitsProcessor;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use rand::prelude::*;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::thread;
 use token_output_stream::TokenOutputStream;
 
@@ -15,10 +16,8 @@ mod transformer;
 /// Generator configuration.
 #[derive(Debug)]
 pub struct Config {
-    /// The temperature used to generate samples.
-    pub temperature: Option<f64>,
-    /// Nucleus sampling probability cutoff.
-    pub top_p: Option<f64>,
+    /// Best K tokens
+    pub top_k: Option<usize>,
     /// Penalty to be applied for repeating tokens, 1. means no penalty.
     pub repeat_penalty: f32,
     /// The context size to consider for the repeat penalty.
@@ -32,8 +31,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            temperature: None,
-            top_p: None,
+            top_k: Some(5),
             repeat_penalty: 1.1,
             repeat_last_n: 128,
             sample_max: 2048,
@@ -116,8 +114,6 @@ fn generator(config: Config, command_rx: Receiver<Command>, message_tx: Sender<M
     };
 
     let mut tokenizer = TokenOutputStream::new();
-    let seed = config.seed.unwrap_or_else(|| thread_rng().gen());
-    let mut logits_processor = LogitsProcessor::new(seed, config.temperature, config.top_p);
 
     while let Ok(cmd) = command_rx.recv() {
         match cmd {
@@ -135,7 +131,6 @@ fn generator(config: Config, command_rx: Receiver<Command>, message_tx: Sender<M
                         start_pos,
                         &config,
                         &mut model,
-                        &mut logits_processor,
                         tokenizer.eos_token(),
                     );
 
@@ -171,7 +166,6 @@ fn generate_token(
     start_pos: usize,
     config: &Config,
     model: &mut Transformer,
-    logits_processor: &mut LogitsProcessor,
     eos_token: u32,
 ) -> Result<Option<u32>> {
     let device = Device::Cpu;
@@ -191,10 +185,62 @@ fn generate_token(
         )?
     };
 
-    let next_token = logits_processor.sample(&logits)?;
+    let next_token = top_k(config.top_k, &logits)?;
     if next_token == eos_token {
         Ok(None)
     } else {
         Ok(Some(next_token))
     }
+}
+
+fn top_k(top_k: Option<usize>, logits: &Tensor) -> Result<u32> {
+    #[derive(PartialEq, Debug)]
+    struct HeapVal(f32);
+
+    impl Eq for HeapVal {}
+
+    impl PartialOrd for HeapVal {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for HeapVal {
+        fn cmp(&self, other: &HeapVal) -> Ordering {
+            other.0.partial_cmp(&self.0).unwrap_or(Ordering::Greater)
+        }
+    }
+
+    let top_k = top_k.unwrap_or(5);
+    let logits_v: Vec<f32> = logits.to_vec1()?;
+
+    let mut heap = BinaryHeap::with_capacity(top_k);
+    for (idx, v) in logits_v.iter().enumerate() {
+        heap.push((HeapVal(*v), idx));
+        if heap.len() > top_k {
+            heap.pop();
+        }
+    }
+
+    let max_logit = heap
+        .iter()
+        .max_by(|(u, _), (v, _)| u.cmp(v))
+        .map(|(l, _)| l.0)
+        .unwrap();
+
+    let (exp_logits, tokens): (Vec<_>, Vec<_>) = heap
+        .into_iter()
+        .map(|(l, t)| ((l.0 - max_logit).exp(), t))
+        .unzip();
+
+    let total = exp_logits.iter().sum::<f32>();
+    let softmax = exp_logits
+        .into_iter()
+        .map(|v| v / total)
+        .collect::<Vec<_>>();
+
+    let mut rng = rand::thread_rng();
+    let distr = rand::distributions::WeightedIndex::new(softmax)?;
+    let next_token = tokens[distr.sample(&mut rng)];
+    Ok(next_token as u32)
 }
