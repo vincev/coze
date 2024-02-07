@@ -9,14 +9,8 @@ const ROUNDING: f32 = 8.0;
 pub struct App {
     prompt: String,
     prompt_id: Id,
-    history: History,
+    history: Vec<Prompt>,
     generator: Generator,
-}
-
-#[derive(serde::Deserialize, serde::Serialize, Default, Debug)]
-#[serde(default)]
-struct History {
-    prompts: Vec<Prompt>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
@@ -48,7 +42,7 @@ impl App {
         let prompt = self.prompt.trim();
         if !prompt.is_empty() {
             self.generator.send_prompt(prompt);
-            self.history.prompts.push(Prompt {
+            self.history.push(Prompt {
                 prompt: prompt.to_owned(),
                 reply: Default::default(),
             });
@@ -70,12 +64,12 @@ impl eframe::App for App {
 
         match self.generator.next_message() {
             Some(Message::Token(s)) => {
-                if let Some(prompt) = self.history.prompts.last_mut() {
+                if let Some(prompt) = self.history.last_mut() {
                     prompt.reply.push_str(&s);
                     scroll_to_bottom = true;
                 }
             }
-            Some(Message::Error(s)) => todo!(),
+            Some(Message::Error(s)) => {}
             None => (),
         };
 
@@ -85,7 +79,7 @@ impl eframe::App for App {
             menu::bar(ui, |ui| {
                 ui.menu_button("Edit", |ui| {
                     if ui.button("Clear history").clicked() {
-                        self.history.prompts.clear();
+                        self.history.clear();
                         ui.close_menu();
                     }
                 });
@@ -129,7 +123,7 @@ impl eframe::App for App {
                 .auto_shrink(false)
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    for prompt in &self.history.prompts {
+                    for prompt in &self.history {
                         let r = ui.add(Bubble::new(&prompt.prompt, BubbleContent::Prompt));
                         if r.clicked() {
                             ui.ctx().copy_text(prompt.prompt.clone());
