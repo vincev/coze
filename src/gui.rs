@@ -1,6 +1,7 @@
 use egui::*;
+use serde::{Deserialize, Serialize};
 
-use crate::generator::{Generator, Message, PromptId};
+use crate::generator::{ConfigValue, Generator, Message, PromptId};
 
 const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
 const ROUNDING: f32 = 8.0;
@@ -10,12 +11,20 @@ pub struct App {
     prompt: String,
     prompt_field_id: Id,
     last_prompt_id: PromptId,
-    history: Vec<Prompt>,
+    state: PersistedState,
     generator: Generator,
     error: Option<String>,
+    config: Option<ConfigValue>,
 }
 
-#[derive(serde::Deserialize, serde::Serialize, Debug)]
+/// State persisted by egui.
+#[derive(Deserialize, Serialize, Debug, Default)]
+struct PersistedState {
+    history: Vec<Prompt>,
+    config: ConfigValue,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
 struct Prompt {
     prompt: String,
     reply: String,
@@ -23,22 +32,23 @@ struct Prompt {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // let model = generator::Generator::new(None, None, 1.1, 64).unwrap();
-
-        let history = if let Some(storage) = cc.storage {
+        let state: PersistedState = if let Some(storage) = cc.storage {
             // Load previous app state (if any).
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         } else {
             Default::default()
         };
 
+        let generator = Generator::new(state.config);
+
         Self {
             prompt_field_id: Id::new("prompt-id"),
             last_prompt_id: PromptId::default(),
             prompt: Default::default(),
-            history,
-            generator: Generator::new(Default::default()),
+            state,
+            generator,
             error: None,
+            config: None,
         }
     }
 
@@ -49,7 +59,7 @@ impl App {
             while self.generator.next_message().is_some() {}
 
             self.last_prompt_id = self.generator.send_prompt(prompt);
-            self.history.push(Prompt {
+            self.state.history.push(Prompt {
                 prompt: prompt.to_owned(),
                 reply: Default::default(),
             });
@@ -62,12 +72,17 @@ impl App {
 impl eframe::App for App {
     /// Called by the framework to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, &self.history);
+        eframe::set_value(storage, eframe::APP_KEY, &self.state);
     }
 
     /// Handle input and repaint screen.
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         let mut scroll_to_bottom = false;
+
+        ctx.send_viewport_cmd(ViewportCommand::Title(format!(
+            "Coze ({})",
+            self.state.config.description()
+        )));
 
         match self.generator.next_message() {
             Some(Message::Token(prompt_id, s)) => {
@@ -75,7 +90,7 @@ impl eframe::App for App {
                 // sends a new prompt when there are remaining tokens for the current
                 // one.
                 if self.last_prompt_id == prompt_id {
-                    if let Some(prompt) = self.history.last_mut() {
+                    if let Some(prompt) = self.state.history.last_mut() {
                         prompt.reply.push_str(&s);
                         scroll_to_bottom = true;
                     }
@@ -92,8 +107,13 @@ impl eframe::App for App {
         TopBottomPanel::top("top_panel").show(ctx, |ui| {
             menu::bar(ui, |ui| {
                 ui.menu_button("Edit", |ui| {
+                    if ui.button("Config").clicked() {
+                        self.config = Some(self.generator.config());
+                        ui.close_menu();
+                    }
+
                     if ui.button("Clear history").clicked() {
-                        self.history.clear();
+                        self.state.history.clear();
                         ui.close_menu();
                     }
                 });
@@ -137,7 +157,7 @@ impl eframe::App for App {
                 .auto_shrink(false)
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    for prompt in &self.history {
+                    for prompt in &self.state.history {
                         let r = ui.add(Bubble::new(&prompt.prompt, BubbleContent::Prompt));
                         if r.clicked() {
                             ui.ctx().copy_text(prompt.prompt.clone());
@@ -166,6 +186,52 @@ impl eframe::App for App {
                 });
             ui.allocate_space(ui.available_size());
         });
+
+        // Show config dialog.
+        if self.config.is_some() {
+            egui::Window::new("Config")
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                        let mut config = self.config.take().unwrap();
+                        ui.horizontal(|ui| {
+                            ui.label("Generator mode: ");
+                            egui::ComboBox::from_label("")
+                                .selected_text(config.description())
+                                .show_ui(ui, |ui| {
+                                    ui.style_mut().wrap = Some(false);
+                                    ui.set_min_width(60.0);
+                                    ui.selectable_value(
+                                        &mut config,
+                                        ConfigValue::Careful,
+                                        ConfigValue::Careful.description(),
+                                    );
+                                    ui.selectable_value(
+                                        &mut config,
+                                        ConfigValue::Creative,
+                                        ConfigValue::Creative.description(),
+                                    );
+                                    ui.selectable_value(
+                                        &mut config,
+                                        ConfigValue::Deranged,
+                                        ConfigValue::Deranged.description(),
+                                    );
+                                });
+                        });
+
+                        self.config = Some(config);
+
+                        ui.add_space(ui.spacing().item_spacing.y * 2.5);
+                        if ui.button("Close").clicked() {
+                            self.state.config = config;
+                            self.generator.set_config(config);
+                            self.config = None;
+                        }
+                    });
+                });
+        }
 
         // Show error window if any.
         if self.error.is_some() {

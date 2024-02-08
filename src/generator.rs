@@ -2,6 +2,7 @@ use anyhow::Result;
 use candle::{DType, Device, Tensor};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use rand::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::thread;
@@ -13,29 +14,80 @@ mod arcade100k;
 mod token_output_stream;
 mod transformer;
 
-/// Generator configuration.
-#[derive(Debug)]
-pub struct Config {
-    /// Best K tokens
-    pub top_k: Option<usize>,
-    /// Penalty to be applied for repeating tokens, 1. means no penalty.
-    pub repeat_penalty: f32,
-    /// The context size to consider for the repeat penalty.
-    pub repeat_last_n: usize,
-    /// The maximum sample length.
-    pub sample_max: u32,
-    /// Random seed
-    pub seed: Option<u64>,
+/// A configuration value.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ConfigValue {
+    /// Choose the token with highest probability
+    #[default]
+    Careful,
+    /// Choose from a small number of best tokens,
+    Creative,
+    /// Choose at random from more tokens.
+    Deranged,
 }
 
-impl Default for Config {
-    fn default() -> Self {
+impl ConfigValue {
+    /// Gets the value description.
+    pub fn description(&self) -> &'static str {
+        match self {
+            ConfigValue::Careful => "Careful",
+            ConfigValue::Creative => "Creative",
+            ConfigValue::Deranged => "Deranged",
+        }
+    }
+
+    fn config(&self) -> Config {
+        match self {
+            ConfigValue::Careful => Config::careful(),
+            ConfigValue::Creative => Config::creative(),
+            ConfigValue::Deranged => Config::deranged(),
+        }
+    }
+}
+
+/// Generator configuration.
+#[derive(Debug, Clone, Copy)]
+struct Config {
+    /// Best K tokens
+    top_k: usize,
+    /// Temperature (higher value flattens token probabilities).
+    temperature: f32,
+    /// Penalty to be applied for repeating tokens, 1. means no penalty.
+    repeat_penalty: f32,
+    /// The context size to consider for the repeat penalty.
+    repeat_last_n: usize,
+    /// The maximum sample length.
+    sample_max: u32,
+}
+
+impl Config {
+    fn careful() -> Self {
         Self {
-            top_k: Some(5),
-            repeat_penalty: 1.1,
+            top_k: 1,
+            temperature: 1.,
+            repeat_penalty: 1.2,
+            repeat_last_n: 64,
+            sample_max: 2048,
+        }
+    }
+
+    fn creative() -> Self {
+        Self {
+            top_k: 5,
+            temperature: 2.,
+            repeat_penalty: 1.2,
+            repeat_last_n: 64,
+            sample_max: 2048,
+        }
+    }
+
+    fn deranged() -> Self {
+        Self {
+            top_k: 10,
+            temperature: 5.,
+            repeat_penalty: 2.,
             repeat_last_n: 128,
             sample_max: 2048,
-            seed: None,
         }
     }
 }
@@ -54,7 +106,7 @@ enum Command {
     /// Process the given prompt.
     Prompt(PromptId, String),
     /// Update the generator configuration.
-    Config(Config),
+    Config(ConfigValue),
     /// Shutdown generator thread.
     Shutdown,
 }
@@ -77,11 +129,12 @@ pub struct Generator {
     message_rx: Receiver<Message>,
     task: Option<thread::JoinHandle<()>>,
     last_prompt_id: PromptId,
+    config: ConfigValue,
 }
 
 impl Generator {
     /// Creates a new generator with the given configuration.
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: ConfigValue) -> Self {
         let (command_tx, command_rx) = bounded(1024);
         let (message_tx, message_rx) = bounded(1024);
 
@@ -94,6 +147,7 @@ impl Generator {
             message_rx,
             task: Some(task),
             last_prompt_id: PromptId::default(),
+            config,
         }
     }
 
@@ -109,6 +163,17 @@ impl Generator {
         self.last_prompt_id
     }
 
+    /// Returns the current config.
+    pub fn config(&self) -> ConfigValue {
+        self.config
+    }
+
+    /// Sets the generator config
+    pub fn set_config(&mut self, config: ConfigValue) {
+        self.config = config;
+        let _ = self.command_tx.send(Command::Config(config));
+    }
+
     /// Get the next available generator message.
     pub fn next_message(&self) -> Option<Message> {
         self.message_rx.try_recv().ok()
@@ -121,7 +186,11 @@ impl Generator {
     }
 }
 
-fn generator(config: Config, command_rx: Receiver<Command>, message_tx: Sender<Message>) {
+fn generator(
+    config_value: ConfigValue,
+    command_rx: Receiver<Command>,
+    message_tx: Sender<Message>,
+) {
     let mut model = match Transformer::new() {
         Ok(model) => model,
         Err(e) => {
@@ -131,6 +200,7 @@ fn generator(config: Config, command_rx: Receiver<Command>, message_tx: Sender<M
     };
 
     let mut tokenizer = TokenOutputStream::new();
+    let mut config = config_value.config();
 
     while let Ok(cmd) = command_rx.recv() {
         match cmd {
@@ -177,7 +247,7 @@ fn generator(config: Config, command_rx: Receiver<Command>, message_tx: Sender<M
                     let _ = message_tx.send(Message::Token(prompt_id, token_str));
                 }
             }
-            Command::Config(_config) => todo!(),
+            Command::Config(value) => config = value.config(),
             Command::Shutdown => break,
         }
     }
@@ -207,7 +277,7 @@ fn generate_token(
         )?
     };
 
-    let next_token = top_k(config.top_k, &logits)?;
+    let next_token = top_k(config, &logits)?;
     if next_token == eos_token {
         Ok(None)
     } else {
@@ -215,7 +285,7 @@ fn generate_token(
     }
 }
 
-fn top_k(top_k: Option<usize>, logits: &Tensor) -> Result<u32> {
+fn top_k(config: &Config, logits: &Tensor) -> Result<u32> {
     #[derive(PartialEq, Debug)]
     struct HeapVal(f32);
 
@@ -233,13 +303,12 @@ fn top_k(top_k: Option<usize>, logits: &Tensor) -> Result<u32> {
         }
     }
 
-    let top_k = top_k.unwrap_or(5);
     let logits_v: Vec<f32> = logits.to_vec1()?;
 
-    let mut heap = BinaryHeap::with_capacity(top_k);
+    let mut heap = BinaryHeap::with_capacity(config.top_k);
     for (idx, v) in logits_v.iter().enumerate() {
         heap.push((HeapVal(*v), idx));
-        if heap.len() > top_k {
+        if heap.len() > config.top_k {
             heap.pop();
         }
     }
@@ -252,7 +321,7 @@ fn top_k(top_k: Option<usize>, logits: &Tensor) -> Result<u32> {
 
     let (exp_logits, tokens): (Vec<_>, Vec<_>) = heap
         .into_iter()
-        .map(|(l, t)| ((l.0 - max_logit).exp(), t))
+        .map(|(l, t)| (((l.0 - max_logit) / config.temperature).exp(), t))
         .unzip();
 
     let total = exp_logits.iter().sum::<f32>();
