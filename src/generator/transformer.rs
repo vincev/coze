@@ -13,11 +13,22 @@ pub struct Transformer {
 }
 
 impl Transformer {
+    #[cfg(not(feature = "develop"))]
     pub fn new() -> anyhow::Result<Self> {
         static WEIGHTS: &[u8] = include_bytes!("../../model/stablelm-2-zephyr-1_6b-Q4_1.gguf");
 
         let device = Device::Cpu;
         let vb = VarBuilder::from_gguf_buffer(WEIGHTS, &device)?;
+        let config = Config::new();
+        let model = StableLM::new(&config, vb)?;
+
+        Ok(Self { model })
+    }
+
+    #[cfg(feature = "develop")]
+    pub fn new() -> anyhow::Result<Self> {
+        let device = Device::Cpu;
+        let vb = VarBuilder::from_gguf("./model/stablelm-2-zephyr-1_6b-Q4_1.gguf", &device)?;
         let config = Config::new();
         let model = StableLM::new(&config, vb)?;
 

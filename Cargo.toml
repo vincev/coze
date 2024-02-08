@@ -23,3 +23,6 @@ serde_json = "1.0.113"
 version = "0.26.0"
 default-features = false
 features = ["default_fonts", "glow", "persistence"]
+
+[features]
+develop = []
