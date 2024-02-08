@@ -1,6 +1,6 @@
 use egui::*;
 
-use crate::generator::{Generator, Message};
+use crate::generator::{Generator, Message, PromptId};
 
 const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
 const ROUNDING: f32 = 8.0;
@@ -8,7 +8,8 @@ const ROUNDING: f32 = 8.0;
 #[derive(Debug)]
 pub struct App {
     prompt: String,
-    prompt_id: Id,
+    prompt_field_id: Id,
+    last_prompt_id: PromptId,
     history: Vec<Prompt>,
     generator: Generator,
     error: Option<String>,
@@ -32,7 +33,8 @@ impl App {
         };
 
         Self {
-            prompt_id: Id::new("prompt-id"),
+            prompt_field_id: Id::new("prompt-id"),
+            last_prompt_id: PromptId::default(),
             prompt: Default::default(),
             history,
             generator: Generator::new(Default::default()),
@@ -43,7 +45,10 @@ impl App {
     fn send_prompt(&mut self) {
         let prompt = self.prompt.trim();
         if !prompt.is_empty() {
-            self.generator.send_prompt(prompt);
+            // Flush tokens from previous prompt
+            while self.generator.next_message().is_some() {}
+
+            self.last_prompt_id = self.generator.send_prompt(prompt);
             self.history.push(Prompt {
                 prompt: prompt.to_owned(),
                 reply: Default::default(),
@@ -65,10 +70,15 @@ impl eframe::App for App {
         let mut scroll_to_bottom = false;
 
         match self.generator.next_message() {
-            Some(Message::Token(s)) => {
-                if let Some(prompt) = self.history.last_mut() {
-                    prompt.reply.push_str(&s);
-                    scroll_to_bottom = true;
+            Some(Message::Token(prompt_id, s)) => {
+                // Skip tokens from a previous prompt, this may happen if the user
+                // sends a new prompt when there are remaining tokens for the current
+                // one.
+                if self.last_prompt_id == prompt_id {
+                    if let Some(prompt) = self.history.last_mut() {
+                        prompt.reply.push_str(&s);
+                        scroll_to_bottom = true;
+                    }
                 }
             }
             Some(Message::Error(msg)) => {
@@ -77,7 +87,7 @@ impl eframe::App for App {
             None => (),
         };
 
-        ctx.memory_mut(|m| m.request_focus(self.prompt_id));
+        ctx.memory_mut(|m| m.request_focus(self.prompt_field_id));
 
         TopBottomPanel::top("top_panel").show(ctx, |ui| {
             menu::bar(ui, |ui| {
@@ -105,7 +115,7 @@ impl eframe::App for App {
                     .fill(Color32::from_gray(230))
                     .show(ui, |ui| {
                         let text = TextEdit::multiline(&mut self.prompt)
-                            .id(self.prompt_id)
+                            .id(self.prompt_field_id)
                             .font(TEXT_FONT)
                             .frame(false)
                             .margin(Vec2::new(5.0, 5.0))

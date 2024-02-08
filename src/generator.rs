@@ -40,10 +40,19 @@ impl Default for Config {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PromptId(u32);
+
+impl PromptId {
+    fn inc(&self) -> PromptId {
+        PromptId(self.0 + 1)
+    }
+}
+
 /// Command for the generator.
 enum Command {
     /// Process the given prompt.
-    Prompt(String),
+    Prompt(PromptId, String),
     /// Update the generator configuration.
     Config(Config),
     /// Shutdown generator thread.
@@ -53,7 +62,7 @@ enum Command {
 /// A message sent by the generator task
 pub enum Message {
     /// A generated token.
-    Token(String),
+    Token(PromptId, String),
     /// An error message.
     Error(String),
 }
@@ -67,6 +76,7 @@ pub struct Generator {
     command_tx: Sender<Command>,
     message_rx: Receiver<Message>,
     task: Option<thread::JoinHandle<()>>,
+    last_prompt_id: PromptId,
 }
 
 impl Generator {
@@ -83,13 +93,20 @@ impl Generator {
             command_tx,
             message_rx,
             task: Some(task),
+            last_prompt_id: PromptId::default(),
         }
     }
 
     /// Sends a new prompt to the mode.
-    pub fn send_prompt(&self, prompt: &str) {
+    pub fn send_prompt(&mut self, prompt: &str) -> PromptId {
+        self.last_prompt_id = self.last_prompt_id.inc();
+
         let template = format!("<|user|>\n{prompt}<|endoftext|>\n<|assistant|>\n");
-        let _ = self.command_tx.send(Command::Prompt(template));
+        let _ = self
+            .command_tx
+            .send(Command::Prompt(self.last_prompt_id, template));
+
+        self.last_prompt_id
     }
 
     /// Get the next available generator message.
@@ -105,7 +122,7 @@ impl Generator {
 }
 
 fn generator(config: Config, command_rx: Receiver<Command>, message_tx: Sender<Message>) {
-    let mut model = match transformer::Transformer::new() {
+    let mut model = match Transformer::new() {
         Ok(model) => model,
         Err(e) => {
             let _ = message_tx.send(Message::Error(e.to_string()));
@@ -117,7 +134,7 @@ fn generator(config: Config, command_rx: Receiver<Command>, message_tx: Sender<M
 
     while let Ok(cmd) = command_rx.recv() {
         match cmd {
-            Command::Prompt(prompt) => {
+            Command::Prompt(prompt_id, prompt) => 'prompt: {
                 tokenizer.clear();
                 model.reset();
 
@@ -142,17 +159,22 @@ fn generator(config: Config, command_rx: Receiver<Command>, message_tx: Sender<M
                         Ok(Some(token)) => {
                             tokens.push(token);
                             if let Ok(Some(token_str)) = tokenizer.next_token(token) {
-                                let _ = message_tx.send(Message::Token(token_str));
+                                let _ = message_tx.send(Message::Token(prompt_id, token_str));
                             }
                         }
                         Err(err) => {
                             let _ = message_tx.send(Message::Error(err.to_string()));
                         }
                     }
+
+                    // Skip remainining tokens if there is a new command.
+                    if !command_rx.is_empty() {
+                        break 'prompt;
+                    }
                 }
 
                 if let Ok(Some(token_str)) = tokenizer.decode_rest() {
-                    let _ = message_tx.send(Message::Token(token_str));
+                    let _ = message_tx.send(Message::Token(prompt_id, token_str));
                 }
             }
             Command::Config(_config) => todo!(),
