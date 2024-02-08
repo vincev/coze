@@ -7,9 +7,6 @@ use candle_transformers::{
 };
 use std::sync::Arc;
 
-static WEIGHTS: &[u8] = include_bytes!("../../model/stablelm-2-zephyr-1_6b-Q4_1.gguf");
-static CONFIG: &str = include_str!("model_config.json");
-
 #[derive(Debug)]
 pub struct Transformer {
     model: StableLM,
@@ -17,9 +14,11 @@ pub struct Transformer {
 
 impl Transformer {
     pub fn new() -> anyhow::Result<Self> {
+        static WEIGHTS: &[u8] = include_bytes!("../../model/stablelm-2-zephyr-1_6b-Q4_1.gguf");
+
         let device = Device::Cpu;
         let vb = VarBuilder::from_gguf_buffer(WEIGHTS, &device)?;
-        let config: Config = serde_json::from_str(CONFIG)?;
+        let config = Config::new();
         let model = StableLM::new(&config, vb)?;
 
         Ok(Self { model })
@@ -60,6 +59,23 @@ pub struct Config {
 }
 
 impl Config {
+    fn new() -> Self {
+        Self {
+            hidden_act: Activation::Silu,
+            hidden_size: 2048,
+            intermediate_size: 5632,
+            max_position_embeddings: 4096,
+            norm_eps: 1e-5,
+            num_attention_heads: 32,
+            num_hidden_layers: 24,
+            num_key_value_heads: 32,
+            rope_pct: 0.25,
+            rope_theta: 10_000.,
+            use_cache: true,
+            use_qkv_bias: true,
+            vocab_size: 100352,
+        }
+    }
     pub fn head_dim(&self) -> usize {
         self.hidden_size / self.num_attention_heads
     }
