@@ -107,6 +107,8 @@ enum Command {
     Prompt(PromptId, String),
     /// Update the generator configuration.
     Config(ConfigValue),
+    /// Stops token generation.
+    Stop,
     /// Shutdown generator thread.
     Shutdown,
 }
@@ -179,6 +181,14 @@ impl Generator {
         self.message_rx.try_recv().ok()
     }
 
+    /// Stops token generation.
+    ///
+    /// This may be useful when the generator is in deranged mode and it keeps
+    /// generating text we are not interested in.
+    pub fn stop(&self) {
+        let _ = self.command_tx.send(Command::Stop);
+    }
+
     /// Shutdown generator thread
     pub fn shutdown(&mut self) {
         let _ = self.command_tx.send(Command::Shutdown);
@@ -248,6 +258,7 @@ fn generator(
                 }
             }
             Command::Config(value) => config = value.config(),
+            Command::Stop => {}
             Command::Shutdown => break,
         }
     }

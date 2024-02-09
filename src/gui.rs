@@ -102,6 +102,11 @@ impl eframe::App for App {
             None => (),
         };
 
+        // Stops tokens generation for the current prompt.
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.generator.stop();
+        }
+
         ctx.memory_mut(|m| m.request_focus(self.prompt_field_id));
 
         TopBottomPanel::top("top_panel").show(ctx, |ui| {
