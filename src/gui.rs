@@ -1,4 +1,4 @@
-use egui::*;
+use eframe::egui::*;
 use serde::{Deserialize, Serialize};
 
 use crate::generator::{ConfigValue, Generator, Message, PromptId};
@@ -83,16 +83,16 @@ impl App {
     fn config_window(&mut self, ctx: &Context) {
         // Show config dialog.
         if self.config.is_some() {
-            egui::Window::new("Config")
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            Window::new("Config")
+                .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .collapsible(false)
                 .resizable(false)
                 .show(ctx, |ui| {
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.with_layout(Layout::top_down(Align::Center), |ui| {
                         let mut config = self.config.take().unwrap();
                         ui.horizontal(|ui| {
                             ui.label("Generator mode: ");
-                            egui::ComboBox::from_label("")
+                            ComboBox::from_label("")
                                 .selected_text(config.description())
                                 .show_ui(ui, |ui| {
                                     ui.style_mut().wrap = Some(false);
@@ -131,12 +131,12 @@ impl App {
     fn error_window(&mut self, ctx: &Context) {
         // Show error window if any.
         if self.error.is_some() {
-            egui::Window::new("Error")
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            Window::new("Error")
+                .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
                 .collapsible(false)
                 .resizable(false)
                 .show(ctx, |ui| {
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.with_layout(Layout::top_down(Align::Center), |ui| {
                         let msg = self.error.as_ref().unwrap();
                         ui.label(RichText::new(msg).font(TEXT_FONT));
                         ui.add_space(ui.spacing().item_spacing.y * 2.5);
@@ -425,7 +425,7 @@ impl HistoryNavigator {
         loop {
             cursor = cursor.saturating_sub(1);
             if let Some(prompt) = history.get(cursor) {
-                if prompt.prompt.to_lowercase().starts_with(&self.pattern) {
+                if self.is_match(history, &prompt.prompt) {
                     self.cursor = cursor;
                     return Some(prompt.prompt.clone());
                 }
@@ -447,7 +447,7 @@ impl HistoryNavigator {
         loop {
             cursor = cursor.saturating_add(1);
             if let Some(prompt) = history.get(cursor) {
-                if prompt.prompt.to_lowercase().starts_with(&self.pattern) {
+                if self.is_match(history, &prompt.prompt) {
                     self.cursor = cursor;
                     return Some(prompt.prompt.clone());
                 }
@@ -455,5 +455,31 @@ impl HistoryNavigator {
                 return None;
             }
         }
+    }
+
+    fn is_match(&self, history: &[Prompt], text: &str) -> bool {
+        // Skip repeated prompts.
+        let match_current = history
+            .get(self.cursor)
+            .map(|p| text.eq_ignore_ascii_case(&p.prompt))
+            .unwrap_or_default();
+
+        if match_current {
+            return false;
+        }
+
+        let mut pit = self.pattern.chars().peekable();
+
+        for c in text.chars() {
+            if let Some(p) = pit.peek() {
+                if p.eq_ignore_ascii_case(&c) {
+                    pit.next();
+                }
+            } else {
+                break;
+            }
+        }
+
+        pit.peek().is_none()
     }
 }
