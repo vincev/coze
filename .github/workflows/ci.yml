@@ -1,0 +1,50 @@
+name: ci
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.head_ref || github.sha }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+on:
+  push:
+    paths-ignore:
+      - "**.md"
+      - docs/**
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - docs/**
+  # manual trigger
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        build: [linux]
+        include:
+        - build: linux
+          os: ubuntu-latest
+          rust: stable
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    - name: Remove unnecessary files
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    - name: Run tests
+      run: |
+        df -h .
+        cargo clean
+        cargo test --verbose
