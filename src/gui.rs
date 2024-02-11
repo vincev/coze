@@ -6,6 +6,10 @@ use crate::generator::{ConfigValue, Generator, Message, PromptId};
 const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
 const ROUNDING: f32 = 8.0;
 
+mod config;
+mod error;
+mod help;
+
 #[derive(Debug)]
 pub struct App {
     prompt: String,
@@ -15,6 +19,7 @@ pub struct App {
     generator: Generator,
     error: Option<String>,
     config: Option<ConfigValue>,
+    show_help: bool,
     matcher: HistoryNavigator,
     ctx: Context,
 }
@@ -51,6 +56,7 @@ impl App {
             generator,
             error: None,
             config: None,
+            show_help: false,
             matcher: HistoryNavigator::new(),
             ctx: cc.egui_ctx.clone(),
         }
@@ -80,71 +86,34 @@ impl App {
         state.store(&self.ctx, self.prompt_field_id);
     }
 
-    fn config_window(&mut self, ctx: &Context) {
-        // Show config dialog.
-        if self.config.is_some() {
-            Window::new("Config")
-                .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                        let mut config = self.config.take().unwrap();
-                        ui.horizontal(|ui| {
-                            ui.label("Generator mode: ");
-                            ComboBox::from_label("")
-                                .selected_text(config.description())
-                                .show_ui(ui, |ui| {
-                                    ui.style_mut().wrap = Some(false);
-                                    ui.set_min_width(60.0);
-                                    ui.selectable_value(
-                                        &mut config,
-                                        ConfigValue::Careful,
-                                        ConfigValue::Careful.description(),
-                                    );
-                                    ui.selectable_value(
-                                        &mut config,
-                                        ConfigValue::Creative,
-                                        ConfigValue::Creative.description(),
-                                    );
-                                    ui.selectable_value(
-                                        &mut config,
-                                        ConfigValue::Deranged,
-                                        ConfigValue::Deranged.description(),
-                                    );
-                                });
-                        });
-
-                        self.config = Some(config);
-
-                        ui.add_space(ui.spacing().item_spacing.y * 2.5);
-                        if ui.button("Close").clicked() {
-                            self.state.config = config;
-                            self.generator.set_config(config);
-                            self.config = None;
-                        }
-                    });
-                });
+    fn process_input(&mut self) {
+        // Stops tokens generation for the current prompt.
+        if self
+            .ctx
+            .input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+        {
+            self.generator.stop();
+            self.reset_prompt("".to_string());
+            self.matcher.reset(&self.prompt);
         }
-    }
 
-    fn error_window(&mut self, ctx: &Context) {
-        // Show error window if any.
-        if self.error.is_some() {
-            Window::new("Error")
-                .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                        let msg = self.error.as_ref().unwrap();
-                        ui.label(RichText::new(msg).font(TEXT_FONT));
-                        ui.add_space(ui.spacing().item_spacing.y * 2.5);
-                        if ui.button("Close").clicked() {
-                            self.error = None;
-                        }
-                    });
-                });
+        // Manage history
+        if self
+            .ctx
+            .input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp))
+        {
+            if let Some(prompt) = self.matcher.up(&self.state.history) {
+                self.reset_prompt(prompt);
+            }
+        }
+
+        if self
+            .ctx
+            .input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown))
+        {
+            if let Some(prompt) = self.matcher.down(&self.state.history) {
+                self.reset_prompt(prompt);
+            }
         }
     }
 }
@@ -166,9 +135,7 @@ impl eframe::App for App {
 
         match self.generator.next_message() {
             Some(Message::Token(prompt_id, s)) => {
-                // Skip tokens from a previous prompt, this may happen if the user
-                // sends a new prompt when there are remaining tokens for the current
-                // one.
+                // Skip tokens from a previous prompt.
                 if self.last_prompt_id == prompt_id {
                     if let Some(prompt) = self.state.history.last_mut() {
                         prompt.reply.push_str(&s);
@@ -182,28 +149,9 @@ impl eframe::App for App {
             None => (),
         };
 
-        // Stops tokens generation for the current prompt.
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
-            self.generator.stop();
-            self.reset_prompt("".to_string());
-            self.matcher.reset(&self.prompt);
-        }
+        self.process_input();
 
-        // Manage history
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
-            if let Some(prompt) = self.matcher.up(&self.state.history) {
-                self.reset_prompt(prompt);
-            }
-        }
-
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
-            if let Some(prompt) = self.matcher.down(&self.state.history) {
-                self.reset_prompt(prompt);
-            }
-        }
-
-        ctx.memory_mut(|m| m.request_focus(self.prompt_field_id));
-
+        // Render menu
         TopBottomPanel::top("top_panel").show(ctx, |ui| {
             menu::bar(ui, |ui| {
                 ui.menu_button("Edit", |ui| {
@@ -217,6 +165,11 @@ impl eframe::App for App {
                         ui.close_menu();
                     }
                 });
+
+                if ui.button("Help").clicked() {
+                    self.show_help = true;
+                    ui.close_menu();
+                }
             });
         });
 
@@ -234,6 +187,8 @@ impl eframe::App for App {
                     .rounding(Rounding::same(ROUNDING))
                     .fill(Color32::from_gray(230))
                     .show(ui, |ui| {
+                        ctx.memory_mut(|m| m.request_focus(self.prompt_field_id));
+
                         let text = TextEdit::multiline(&mut self.prompt)
                             .id(self.prompt_field_id)
                             .cursor_at_end(true)
@@ -292,8 +247,9 @@ impl eframe::App for App {
             ui.allocate_space(ui.available_size());
         });
 
-        self.config_window(ctx);
-        self.error_window(ctx);
+        self.config_window();
+        self.error_window();
+        self.help_window();
 
         // Run 20 frames per second.
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
