@@ -1,7 +1,7 @@
 use eframe::egui::*;
 use serde::{Deserialize, Serialize};
 
-use crate::generator::{ConfigValue, Generator, Message, PromptId};
+use crate::generator::{Generator, GeneratorMode, Message, PromptId};
 
 const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
 const ROUNDING: f32 = 8.0;
@@ -18,17 +18,48 @@ pub struct App {
     state: PersistedState,
     generator: Generator,
     error: Option<String>,
-    config: Option<ConfigValue>,
+    show_config: bool,
     show_help: bool,
     matcher: HistoryNavigator,
     ctx: Context,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize, Debug, Default, PartialEq)]
+enum UiMode {
+    #[default]
+    Light,
+    Dark,
+}
+
+impl UiMode {
+    fn visuals(&self) -> Visuals {
+        match self {
+            UiMode::Light => Visuals::light(),
+            UiMode::Dark => Visuals::dark(),
+        }
+    }
+
+    fn description(&self) -> &'static str {
+        match self {
+            UiMode::Light => "Light",
+            UiMode::Dark => "Dark",
+        }
+    }
+
+    fn fill_color(&self) -> Color32 {
+        match &self {
+            UiMode::Light => Color32::from_gray(230),
+            UiMode::Dark => Color32::from_gray(50),
+        }
+    }
 }
 
 /// State persisted by egui.
 #[derive(Deserialize, Serialize, Debug, Default)]
 struct PersistedState {
     history: Vec<Prompt>,
-    config: ConfigValue,
+    generator_mode: GeneratorMode,
+    ui_mode: UiMode,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -46,7 +77,9 @@ impl App {
             Default::default()
         };
 
-        let generator = Generator::new(state.config);
+        cc.egui_ctx.set_visuals(state.ui_mode.visuals());
+
+        let generator = Generator::new(state.generator_mode);
 
         Self {
             prompt_field_id: Id::new("prompt-id"),
@@ -55,7 +88,7 @@ impl App {
             state,
             generator,
             error: None,
-            config: None,
+            show_config: false,
             show_help: false,
             matcher: HistoryNavigator::new(),
             ctx: cc.egui_ctx.clone(),
@@ -130,7 +163,7 @@ impl eframe::App for App {
 
         ctx.send_viewport_cmd(ViewportCommand::Title(format!(
             "Coze ({})",
-            self.state.config.description()
+            self.generator.mode().description()
         )));
 
         match self.generator.next_message() {
@@ -156,7 +189,7 @@ impl eframe::App for App {
             menu::bar(ui, |ui| {
                 ui.menu_button("Edit", |ui| {
                     if ui.button("Config").clicked() {
-                        self.config = Some(self.generator.config());
+                        self.show_config = true;
                         ui.close_menu();
                     }
 
@@ -185,7 +218,7 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 Frame::group(ui.style())
                     .rounding(Rounding::same(ROUNDING))
-                    .fill(Color32::from_gray(230))
+                    .fill(self.state.ui_mode.fill_color())
                     .show(ui, |ui| {
                         ctx.memory_mut(|m| m.request_focus(self.prompt_field_id));
 
@@ -218,7 +251,11 @@ impl eframe::App for App {
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
                     for prompt in &self.state.history {
-                        let r = ui.add(Bubble::new(&prompt.prompt, BubbleContent::Prompt));
+                        let r = ui.add(Bubble::new(
+                            &prompt.prompt,
+                            BubbleContent::Prompt,
+                            self.state.ui_mode,
+                        ));
                         if r.clicked() {
                             ui.ctx().copy_text(prompt.prompt.clone());
                         }
@@ -231,7 +268,11 @@ impl eframe::App for App {
                         ui.add_space(ui.spacing().item_spacing.y);
 
                         if !prompt.reply.is_empty() {
-                            let r = ui.add(Bubble::new(&prompt.reply, BubbleContent::Reply));
+                            let r = ui.add(Bubble::new(
+                                &prompt.reply,
+                                BubbleContent::Reply,
+                                self.state.ui_mode,
+                            ));
                             if r.clicked() {
                                 ui.ctx().copy_text(prompt.reply.clone());
                             }
@@ -268,25 +309,33 @@ enum BubbleContent {
 struct Bubble {
     text: WidgetText,
     content: BubbleContent,
+    ui_mode: UiMode,
 }
 
 impl Bubble {
-    fn new(text: &str, content: BubbleContent) -> Self {
+    fn new(text: &str, content: BubbleContent, ui_mode: UiMode) -> Self {
         let text = WidgetText::from(RichText::new(text).font(TEXT_FONT).monospace());
-        Self { text, content }
-    }
-
-    fn fill_color(content: &BubbleContent) -> Color32 {
-        match content {
-            BubbleContent::Prompt => Color32::from_rgb(15, 85, 235),
-            BubbleContent::Reply => Color32::from_gray(230),
+        Self {
+            text,
+            content,
+            ui_mode,
         }
     }
 
-    fn text_color(content: &BubbleContent) -> Color32 {
+    fn fill_color(content: &BubbleContent, ui_mode: UiMode) -> Color32 {
+        match content {
+            BubbleContent::Prompt => Color32::from_rgb(15, 85, 235),
+            BubbleContent::Reply => ui_mode.fill_color(),
+        }
+    }
+
+    fn text_color(content: &BubbleContent, ui_mode: UiMode) -> Color32 {
         match content {
             BubbleContent::Prompt => Color32::from_rgb(210, 225, 250),
-            BubbleContent::Reply => Color32::from_gray(55),
+            BubbleContent::Reply => match ui_mode {
+                UiMode::Light => Color32::from_gray(60),
+                UiMode::Dark => Color32::from_gray(180),
+            },
         }
     }
 }
@@ -296,7 +345,11 @@ impl Widget for Bubble {
         const PADDING: f32 = 10.0;
         const WIDTH_PCT: f32 = 0.80;
 
-        let Bubble { text, content } = self;
+        let Bubble {
+            text,
+            content,
+            ui_mode,
+        } = self;
 
         let text_wrap_width = ui.available_width() * WIDTH_PCT - 2.0 * PADDING;
         let galley = text.into_galley(ui, Some(true), text_wrap_width, TextStyle::Monospace);
@@ -314,8 +367,8 @@ impl Widget for Bubble {
         };
 
         if ui.is_rect_visible(rect) {
-            let fill_color = Self::fill_color(&content);
-            let text_color = Self::text_color(&content);
+            let fill_color = Self::fill_color(&content, ui_mode);
+            let text_color = Self::text_color(&content, ui_mode);
 
             // On click expand animation.
             let expand = ui

@@ -14,9 +14,9 @@ mod arcade100k;
 mod token_output_stream;
 mod transformer;
 
-/// A configuration value.
+/// Generator mode defines how tokens are choosen.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum ConfigValue {
+pub enum GeneratorMode {
     /// Choose the token with highest probability
     #[default]
     Careful,
@@ -26,21 +26,21 @@ pub enum ConfigValue {
     Deranged,
 }
 
-impl ConfigValue {
+impl GeneratorMode {
     /// Gets the value description.
     pub fn description(&self) -> &'static str {
         match self {
-            ConfigValue::Careful => "Careful",
-            ConfigValue::Creative => "Creative",
-            ConfigValue::Deranged => "Deranged",
+            GeneratorMode::Careful => "Careful",
+            GeneratorMode::Creative => "Creative",
+            GeneratorMode::Deranged => "Deranged",
         }
     }
 
     fn config(&self) -> Config {
         match self {
-            ConfigValue::Careful => Config::careful(),
-            ConfigValue::Creative => Config::creative(),
-            ConfigValue::Deranged => Config::deranged(),
+            GeneratorMode::Careful => Config::careful(),
+            GeneratorMode::Creative => Config::creative(),
+            GeneratorMode::Deranged => Config::deranged(),
         }
     }
 }
@@ -106,7 +106,7 @@ enum Command {
     /// Process the given prompt.
     Prompt(PromptId, String),
     /// Update the generator configuration.
-    Config(ConfigValue),
+    Config(GeneratorMode),
     /// Stops token generation.
     Stop,
     /// Shutdown generator thread.
@@ -131,17 +131,17 @@ pub struct Generator {
     message_rx: Receiver<Message>,
     task: Option<thread::JoinHandle<()>>,
     last_prompt_id: PromptId,
-    config: ConfigValue,
+    mode: GeneratorMode,
 }
 
 impl Generator {
     /// Creates a new generator with the given configuration.
-    pub fn new(config: ConfigValue) -> Self {
+    pub fn new(mode: GeneratorMode) -> Self {
         let (command_tx, command_rx) = bounded(1024);
         let (message_tx, message_rx) = bounded(1024);
 
         let task = thread::spawn(move || {
-            generator(config, command_rx, message_tx);
+            generator(mode, command_rx, message_tx);
         });
 
         Self {
@@ -149,7 +149,7 @@ impl Generator {
             message_rx,
             task: Some(task),
             last_prompt_id: PromptId::default(),
-            config,
+            mode,
         }
     }
 
@@ -166,13 +166,13 @@ impl Generator {
     }
 
     /// Returns the current config.
-    pub fn config(&self) -> ConfigValue {
-        self.config
+    pub fn mode(&self) -> GeneratorMode {
+        self.mode
     }
 
     /// Sets the generator config
-    pub fn set_config(&mut self, config: ConfigValue) {
-        self.config = config;
+    pub fn set_config(&mut self, config: GeneratorMode) {
+        self.mode = config;
         let _ = self.command_tx.send(Command::Config(config));
     }
 
@@ -197,7 +197,7 @@ impl Generator {
 }
 
 fn generator(
-    config_value: ConfigValue,
+    config_value: GeneratorMode,
     command_rx: Receiver<Command>,
     message_tx: Sender<Message>,
 ) {

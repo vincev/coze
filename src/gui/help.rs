@@ -15,9 +15,8 @@ contains some text it is used to filter the history using fuzzy matching.
 
 # Edit menu
 
-The `Config` menu item shows a dialog with a combo box to select the token
-generation randomness. The `careful` level has the least randomness while the
-`deranged` level has the most randomness.
+The `Config` menu item shows a dialog with two combo boxes, one for choosing the
+token generation randomness and the other for choosing the UI light mode.
 
 The `Clear history` menu item removes all the prompts and replies from the history
 area.
