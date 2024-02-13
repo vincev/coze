@@ -5,7 +5,7 @@ use candle_transformers::{
     quantized_nn::{layer_norm, linear, linear_no_bias, Embedding, Linear},
     quantized_var_builder::VarBuilder,
 };
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 #[derive(Debug)]
 pub struct Transformer {
@@ -13,22 +13,10 @@ pub struct Transformer {
 }
 
 impl Transformer {
-    #[cfg(not(feature = "develop"))]
-    pub fn new() -> anyhow::Result<Self> {
-        static WEIGHTS: &[u8] = include_bytes!("../../model/stablelm-2-zephyr-1_6b-Q4_1.gguf");
-
-        let device = Device::Cpu;
-        let vb = VarBuilder::from_gguf_buffer(WEIGHTS, &device)?;
-        let config = Config::new();
-        let model = StableLM::new(&config, vb)?;
-
-        Ok(Self { model })
-    }
-
-    #[cfg(feature = "develop")]
     pub fn new() -> anyhow::Result<Self> {
         let device = Device::Cpu;
-        let vb = VarBuilder::from_gguf("./model/stablelm-2-zephyr-1_6b-Q4_1.gguf", &device)?;
+        let weights_path = find_model()?;
+        let vb = VarBuilder::from_gguf(weights_path, &device)?;
         let config = Config::new();
         let model = StableLM::new(&config, vb)?;
 
@@ -44,6 +32,42 @@ impl Transformer {
     pub fn forward(&mut self, input_ids: &Tensor, seqlen_offset: usize) -> Result<Tensor> {
         self.model.forward(input_ids, seqlen_offset)
     }
+}
+
+/// Look for the model weights file.
+fn find_model() -> anyhow::Result<PathBuf> {
+    const MODEL_FILENAME: &str = "stablelm-2-zephyr-1_6b-Q4_1.gguf";
+    const MAX_LEVELS: usize = 5;
+
+    // If we are running from the install package then the model is next to
+    // executable otherwise we may be running from source in this case the
+    // executable is in the target folder, we go up a few level and check
+    // for the model folder.
+    let mut exec_path = std::env::current_exe()?
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or(PathBuf::from("."));
+
+    for _ in 0..MAX_LEVELS {
+        let model_file = exec_path.join(MODEL_FILENAME);
+        if model_file.exists() {
+            return Ok(model_file);
+        }
+
+        // Look inside model folder during development
+        let model_file = exec_path.join("model").join(MODEL_FILENAME);
+        if model_file.exists() {
+            return Ok(model_file);
+        }
+
+        if let Some(parent) = exec_path.parent() {
+            exec_path = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+
+    Err(anyhow::anyhow!("Model weights not found"))
 }
 
 // The following model is a copy from:
