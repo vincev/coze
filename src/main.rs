@@ -2,11 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() -> eframe::Result<()> {
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
-        .format_target(false)
-        .init();
-
     const INIT_SIZE: [f32; 2] = [400.0, 600.0];
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()

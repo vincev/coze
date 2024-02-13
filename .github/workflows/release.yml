@@ -1,0 +1,74 @@
+name: release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build release artifact
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        build: [linux, macos-intel, macos-m1, windows]
+        include:
+        - build: linux
+          os: ubuntu-latest
+          os_label: ubuntu
+          cpu: x86_64
+          rust: stable
+          binary: coze
+        - build: macos-intel
+          os: macos-12
+          os_label: macos-intel
+          cpu: x86_64
+          rust: stable
+          binary: coze
+        - build: macos-m1
+          os: macos-14
+          os_label: macos-m1
+          cpu: m1
+          rust: stable
+          binary: coze
+        - build: windows
+          os: windows-latest
+          os_label: windows
+          cpu: x86_64
+          rust: stable
+          binary: coze.exe
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+    - name: Run build
+      run: cargo build --release
+    - name: Run tests
+      run: cargo test --release
+    - name: Prepare release archive
+      run: |
+        mkdir coze
+        cp model/*.gguf coze
+        cp target/release/${{ matrix.binary }} coze
+        tar cvf coze-${{ inputs.version }}-${{ matrix.os_label }}.tar coze
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: coze-${{ inputs.version }}-${{ matrix.os_label }}
+        path: coze-${{ inputs.version }}-${{ matrix.os_label }}.tar
+        compression-level: 0
