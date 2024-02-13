@@ -22,6 +22,7 @@ pub struct App {
     show_help: bool,
     matcher: HistoryNavigator,
     ctx: Context,
+    frame_counter: usize,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, Default, PartialEq)]
@@ -92,6 +93,7 @@ impl App {
             show_help: false,
             matcher: HistoryNavigator::new(),
             ctx: cc.egui_ctx.clone(),
+            frame_counter: 0,
         }
     }
 
@@ -159,6 +161,7 @@ impl eframe::App for App {
 
     /// Handle input and repaint screen.
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        self.frame_counter += 1;
         let mut scroll_to_bottom = false;
 
         ctx.send_viewport_cmd(ViewportCommand::Title(format!(
@@ -277,6 +280,14 @@ impl eframe::App for App {
                                 ui.ctx().copy_text(prompt.reply.clone());
                             }
 
+                            ui.add_space(ui.spacing().item_spacing.y * 2.5);
+                        } else {
+                            let dots = ["⏺   ", " ⏺  ", "  ⏺ ", "   ⏺", "  ⏺ ", " ⏺  "];
+                            ui.add(Bubble::new(
+                                dots[(self.frame_counter / 18) % dots.len()],
+                                BubbleContent::Reply,
+                                self.state.ui_mode,
+                            ));
                             ui.add_space(ui.spacing().item_spacing.y * 2.5);
                         }
                     }
