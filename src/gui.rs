@@ -354,7 +354,7 @@ impl Bubble {
 impl Widget for Bubble {
     fn ui(self, ui: &mut Ui) -> Response {
         const PADDING: f32 = 10.0;
-        const WIDTH_PCT: f32 = 0.80;
+        const WIDTH_PCT: f32 = 0.9;
 
         let Bubble {
             text,
