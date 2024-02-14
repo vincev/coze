@@ -1,9 +1,12 @@
 [package]
-name = "coze"
 authors = ["Vince Vasta <vince.vasta@gmail.com>"]
 description = "An egui app for a local offline LLM model."
-version = "0.1.0"
 edition = "2021"
+exclude = ["model/*.gguf"]
+license = "Apache-2.0"
+name = "coze"
+repository = "https://github.com/vincev/coze"
+version = "0.1.0"
 
 [dependencies]
 anyhow = "1.0.79"
