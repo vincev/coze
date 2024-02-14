@@ -225,6 +225,12 @@ impl eframe::App for App {
                     .show(ui, |ui| {
                         ctx.memory_mut(|m| m.request_focus(self.prompt_field_id));
 
+                        // Override multiline Enter behavior
+                        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
+                            self.send_prompt();
+                            scroll_to_bottom = true;
+                        }
+
                         let text = TextEdit::multiline(&mut self.prompt)
                             .id(self.prompt_field_id)
                             .cursor_at_end(true)
@@ -237,12 +243,6 @@ impl eframe::App for App {
                         let r = ui.add_sized([ui.available_width(), 10.0], text);
                         if r.changed() {
                             self.matcher.reset(&self.prompt);
-                        }
-
-                        // Override multiline Enter behavior
-                        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
-                            self.send_prompt();
-                            scroll_to_bottom = true;
                         }
                     })
             });
