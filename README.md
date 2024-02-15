@@ -1,4 +1,4 @@
-# An egui app for prompting a local offline LLM model.
+# An egui app for prompting a local offline LLM.
 
 <p align="center">
   <img alt="Example prompt" src="media/prompt.gif" height="440">
@@ -7,7 +7,7 @@
 ## Description
 
 `coze` is a small [`egui`](https://github.com/emilk/egui) application for prompting
-a local offline LLM model using the Huggingface [`candle`](https://github.com/huggingface/candle)
+a local offline LLM using the Huggingface [`candle`](https://github.com/huggingface/candle)
 crate.
 
 Currently it uses a [quantized version](./model/README.md) of the
