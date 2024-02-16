@@ -15,10 +15,13 @@ candle = { version = "0.3.3", default-features = false, package = "candle-core" 
 candle-nn = { version = "0.3.3", default-features = false }
 candle-transformers = { version = "0.3.3", default-features = false }
 crossbeam-channel = "0.5.11"
+dirs = "5.0.1"
 fancy-regex = "0.13.0"
+hf-hub = "0.3.2"
 rand = "0.8.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.113"
+ureq = "2.9.6"
 
 [dependencies.eframe]
 version = "0.26.0"

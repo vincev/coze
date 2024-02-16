@@ -179,6 +179,15 @@ impl eframe::App for App {
                     }
                 }
             }
+            Some(Message::WeightsDownloadBegin) => {
+                println!("WeightsDownloadBegin");
+            }
+            Some(Message::WeightsDownloadProgress(pct)) => {
+                println!("WeightsDownloadProgress({pct})");
+            }
+            Some(Message::WeightsDownloadComplete) => {
+                println!("WeightsDownloadComplete");
+            }
             Some(Message::Error(msg)) => {
                 self.error = Some(msg);
             }
@@ -198,6 +207,11 @@ impl eframe::App for App {
 
                     if ui.button("Clear history").clicked() {
                         self.state.history.clear();
+                        ui.close_menu();
+                    }
+
+                    if ui.button("Reload weights").clicked() {
+                        self.generator.reload_weights();
                         ui.close_menu();
                     }
                 });
