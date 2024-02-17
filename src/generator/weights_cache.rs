@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use hf_hub::api::sync::ApiBuilder;
 use std::{fs, io, path::PathBuf};
 
@@ -42,7 +42,7 @@ impl WeightsCache {
     }
 
     /// Dowload weights
-    pub fn download_weights(&self, update_fn: impl Fn(f32) + 'static) -> Result<()> {
+    pub fn download_weights(&self, update_fn: impl Fn(f32) -> bool + 'static) -> Result<()> {
         let agent = ureq::builder().try_proxy_from_env(true).build();
         let response = agent.get(&self.weights_url).call()?;
         let content_length = response
@@ -57,7 +57,11 @@ impl WeightsCache {
         let temp_filepath = self.cache_dir.join(temp_filename);
         let mut temp_file = fs::File::create(&temp_filepath)?;
 
-        io::copy(&mut reader, &mut temp_file)?;
+        if let Err(e) = io::copy(&mut reader, &mut temp_file) {
+            let _ = fs::remove_file(&temp_filepath);
+            bail!("File copy error: {e}");
+        }
+
         temp_file.sync_all()?;
         drop(temp_file);
 
@@ -72,14 +76,14 @@ struct ProgressReader {
     length: usize,
     bytes_read: usize,
     batch_read: usize,
-    update_fn: Box<dyn Fn(f32) + 'static>,
+    update_fn: Box<dyn Fn(f32) -> bool + 'static>,
 }
 
 impl ProgressReader {
     fn new(
         reader: Box<dyn io::Read + Send + Sync>,
         length: usize,
-        update_fn: impl Fn(f32) + 'static,
+        update_fn: impl Fn(f32) -> bool + 'static,
     ) -> Self {
         Self {
             reader,
@@ -90,7 +94,7 @@ impl ProgressReader {
         }
     }
 
-    fn update(&mut self, n: usize) {
+    fn update(&mut self, n: usize) -> io::Result<()> {
         self.batch_read += n;
 
         let pct = if self.length == 0 {
@@ -105,7 +109,13 @@ impl ProgressReader {
         // Notify UI every 1MB
         if self.batch_read > 1_048_576 {
             self.batch_read = 0;
-            (*self.update_fn)(pct);
+            if (*self.update_fn)(pct) {
+                Ok(())
+            } else {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "User interrupt"))
+            }
+        } else {
+            Ok(())
         }
     }
 }
@@ -113,25 +123,25 @@ impl ProgressReader {
 impl std::io::Read for ProgressReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let nread = self.reader.read(buf)?;
-        self.update(nread);
+        self.update(nread)?;
         Ok(nread)
     }
 
     fn read_vectored(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
         let nread = self.reader.read_vectored(bufs)?;
-        self.update(nread);
+        self.update(nread)?;
         Ok(nread)
     }
 
     fn read_to_string(&mut self, buf: &mut String) -> io::Result<usize> {
         let nread = self.reader.read_to_string(buf)?;
-        self.update(nread);
+        self.update(nread)?;
         Ok(nread)
     }
 
     fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         self.reader.read_exact(buf)?;
-        self.update(buf.len());
+        self.update(buf.len())?;
         Ok(())
     }
 }

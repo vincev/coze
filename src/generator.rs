@@ -216,11 +216,11 @@ fn generator(
     command_rx: Receiver<Command>,
     message_tx: Sender<Message>,
 ) {
-    let mut model = match load_model(&message_tx, false) {
-        Ok(model) => model,
+    let mut model = match load_model(&command_rx, &message_tx, false) {
+        Ok(model) => Some(model),
         Err(e) => {
             let _ = message_tx.send(Message::Error(e.to_string()));
-            return;
+            None
         }
     };
 
@@ -230,55 +230,58 @@ fn generator(
     while let Ok(cmd) = command_rx.recv() {
         match cmd {
             Command::Prompt(prompt_id, prompt) => 'prompt: {
-                tokenizer.clear();
-                model.reset();
+                if let Some(model) = model.as_mut() {
+                    tokenizer.clear();
+                    model.reset();
 
-                let mut tokens = tokenizer.encode(&prompt);
+                    let mut tokens = tokenizer.encode(&prompt);
 
-                for idx in 0..config.sample_max {
-                    let context_size = if idx > 0 { 1 } else { tokens.len() };
-                    let start_pos = tokens.len().saturating_sub(context_size);
-                    let result = generate_token(
-                        &tokens,
-                        start_pos,
-                        &config,
-                        &mut model,
-                        tokenizer.eos_token(),
-                    );
+                    for idx in 0..config.sample_max {
+                        let context_size = if idx > 0 { 1 } else { tokens.len() };
+                        let start_pos = tokens.len().saturating_sub(context_size);
+                        let result = generate_token(
+                            &tokens,
+                            start_pos,
+                            &config,
+                            model,
+                            tokenizer.eos_token(),
+                        );
 
-                    match result {
-                        Ok(None) => {
-                            // Generated eos_token
-                            break;
-                        }
-                        Ok(Some(token)) => {
-                            tokens.push(token);
-                            if let Ok(Some(token_str)) = tokenizer.next_token(token) {
-                                let _ = message_tx.send(Message::Token(prompt_id, token_str));
+                        match result {
+                            Ok(None) => {
+                                // Generated eos_token
+                                break;
+                            }
+                            Ok(Some(token)) => {
+                                tokens.push(token);
+                                if let Ok(Some(token_str)) = tokenizer.next_token(token) {
+                                    let _ = message_tx.send(Message::Token(prompt_id, token_str));
+                                }
+                            }
+                            Err(err) => {
+                                let _ = message_tx.send(Message::Error(err.to_string()));
                             }
                         }
-                        Err(err) => {
-                            let _ = message_tx.send(Message::Error(err.to_string()));
+
+                        // Skip remainining tokens if there is a new command.
+                        if !command_rx.is_empty() {
+                            break 'prompt;
                         }
                     }
 
-                    // Skip remainining tokens if there is a new command.
-                    if !command_rx.is_empty() {
-                        break 'prompt;
+                    if let Ok(Some(token_str)) = tokenizer.decode_rest() {
+                        let _ = message_tx.send(Message::Token(prompt_id, token_str));
                     }
-                }
-
-                if let Ok(Some(token_str)) = tokenizer.decode_rest() {
-                    let _ = message_tx.send(Message::Token(prompt_id, token_str));
                 }
             }
             Command::Config(value) => config = value.config(),
             Command::Stop => {}
             Command::ReloadWeights => {
-                match load_model(&message_tx, true) {
-                    Ok(m) => model = m,
+                model = match load_model(&command_rx, &message_tx, true) {
+                    Ok(model) => Some(model),
                     Err(e) => {
                         let _ = message_tx.send(Message::Error(e.to_string()));
+                        model.or(None)
                     }
                 };
             }
@@ -287,7 +290,11 @@ fn generator(
     }
 }
 
-fn load_model(message_tx: &Sender<Message>, reload: bool) -> Result<Transformer> {
+fn load_model(
+    command_rx: &Receiver<Command>,
+    message_tx: &Sender<Message>,
+    reload: bool,
+) -> Result<Transformer> {
     let cache = WeightsCache::new()?;
 
     let weights_path = cache.weights_path();
@@ -295,8 +302,14 @@ fn load_model(message_tx: &Sender<Message>, reload: bool) -> Result<Transformer>
         let _ = message_tx.send(Message::WeightsDownloadBegin);
         cache.download_weights({
             let message_tx = message_tx.clone();
+            let command_rx = command_rx.clone();
             move |pct| {
-                let _ = message_tx.send(Message::WeightsDownloadProgress(pct));
+                if command_rx.is_empty() {
+                    let _ = message_tx.send(Message::WeightsDownloadProgress(pct));
+                    true
+                } else {
+                    false
+                }
             }
         })?;
         let _ = message_tx.send(Message::WeightsDownloadComplete);
