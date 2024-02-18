@@ -3,11 +3,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::generator::{Generator, GeneratorMode, Message, PromptId};
 use bubble::{Bubble, BubbleContent};
+use history::HistoryNavigator;
 
 mod bubble;
 mod config;
 mod error;
 mod help;
+mod history;
 
 const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
 const ROUNDING: f32 = 8.0;
@@ -66,7 +68,7 @@ pub struct App {
     error: Option<String>,
     show_config: bool,
     show_help: bool,
-    matcher: HistoryNavigator,
+    history: HistoryNavigator,
     ctx: Context,
     frame_counter: usize,
 }
@@ -93,7 +95,7 @@ impl App {
             error: None,
             show_config: false,
             show_help: false,
-            matcher: HistoryNavigator::new(),
+            history: HistoryNavigator::new(),
             ctx: cc.egui_ctx.clone(),
             frame_counter: 0,
         }
@@ -113,7 +115,7 @@ impl App {
         }
 
         self.reset_prompt("".to_string());
-        self.matcher.reset(&self.prompt);
+        self.history.reset(&self.prompt);
     }
 
     fn reset_prompt(&mut self, prompt: String) {
@@ -131,7 +133,7 @@ impl App {
         {
             self.generator.stop();
             self.reset_prompt("".to_string());
-            self.matcher.reset(&self.prompt);
+            self.history.reset(&self.prompt);
         }
 
         // Manage history
@@ -139,7 +141,7 @@ impl App {
             .ctx
             .input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp))
         {
-            if let Some(prompt) = self.matcher.up(&self.state.history) {
+            if let Some(prompt) = self.history.up(&self.state.history) {
                 self.reset_prompt(prompt);
             }
         }
@@ -148,7 +150,7 @@ impl App {
             .ctx
             .input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown))
         {
-            if let Some(prompt) = self.matcher.down(&self.state.history) {
+            if let Some(prompt) = self.history.down(&self.state.history) {
                 self.reset_prompt(prompt);
             }
         }
@@ -258,7 +260,7 @@ impl eframe::App for App {
 
                         let r = ui.add_sized([ui.available_width(), 10.0], text);
                         if r.changed() {
-                            self.matcher.reset(&self.prompt);
+                            self.history.reset(&self.prompt);
                         }
                     })
             });
@@ -325,93 +327,5 @@ impl eframe::App for App {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.generator.shutdown();
-    }
-}
-
-#[derive(Debug)]
-struct HistoryNavigator {
-    pattern: String,
-    cursor: usize,
-}
-
-impl HistoryNavigator {
-    fn new() -> Self {
-        Self {
-            pattern: Default::default(),
-            cursor: usize::MAX,
-        }
-    }
-
-    fn reset(&mut self, pattern: &str) {
-        self.pattern = pattern.to_lowercase();
-        self.cursor = usize::MAX;
-    }
-
-    fn up(&mut self, history: &[Prompt]) -> Option<String> {
-        if history.is_empty() {
-            return None;
-        }
-
-        let mut cursor = self.cursor.min(history.len());
-
-        loop {
-            cursor = cursor.saturating_sub(1);
-            if let Some(prompt) = history.get(cursor) {
-                if self.is_match(history, &prompt.prompt) {
-                    self.cursor = cursor;
-                    return Some(prompt.prompt.clone());
-                }
-            }
-
-            if cursor == 0 {
-                return None;
-            }
-        }
-    }
-
-    fn down(&mut self, history: &[Prompt]) -> Option<String> {
-        if history.is_empty() {
-            return None;
-        }
-
-        let mut cursor = self.cursor.min(history.len() - 1);
-
-        loop {
-            cursor = cursor.saturating_add(1);
-            if let Some(prompt) = history.get(cursor) {
-                if self.is_match(history, &prompt.prompt) {
-                    self.cursor = cursor;
-                    return Some(prompt.prompt.clone());
-                }
-            } else {
-                return None;
-            }
-        }
-    }
-
-    fn is_match(&self, history: &[Prompt], text: &str) -> bool {
-        // Skip repeated prompts.
-        let match_current = history
-            .get(self.cursor)
-            .map(|p| text.eq_ignore_ascii_case(&p.prompt))
-            .unwrap_or_default();
-
-        if match_current {
-            return false;
-        }
-
-        let mut pit = self.pattern.chars().peekable();
-
-        for c in text.chars() {
-            if let Some(p) = pit.peek() {
-                if p.eq_ignore_ascii_case(&c) {
-                    pit.next();
-                }
-            } else {
-                break;
-            }
-        }
-
-        pit.peek().is_none()
     }
 }
