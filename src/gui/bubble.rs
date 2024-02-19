@@ -1,6 +1,9 @@
 use eframe::egui::*;
 
-use super::{UiMode, ROUNDING, TEXT_FONT};
+use super::UiMode;
+
+const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
+const ROUNDING: f32 = 8.0;
 
 pub enum BubbleContent {
     Prompt,

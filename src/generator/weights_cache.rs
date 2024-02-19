@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use hf_hub::api::sync::ApiBuilder;
-use std::{fs, io, path::PathBuf};
+use std::{fs, io, path::PathBuf, time::Duration};
 
 const MODEL_ID: &str = "vincevas/coze-stablelm-2-1_6b";
 const WEIGHTS_FILENAME: &str = "stablelm-2-zephyr-1_6b-Q4_1.gguf";
@@ -43,7 +43,11 @@ impl WeightsCache {
 
     /// Dowload weights
     pub fn download_weights(&self, update_fn: impl Fn(f32) -> bool + 'static) -> Result<()> {
-        let agent = ureq::builder().try_proxy_from_env(true).build();
+        let agent = ureq::builder()
+            .timeout(Duration::from_secs(30))
+            .try_proxy_from_env(true)
+            .build();
+
         let response = agent.get(&self.weights_url).call()?;
         let content_length = response
             .header("content-length")
@@ -68,6 +72,10 @@ impl WeightsCache {
         fs::rename(temp_filepath, self.weights_path())?;
 
         Ok(())
+    }
+
+    pub fn model_name(&self) -> String {
+        "StableLM-2-Zephyr-1_6B".into()
     }
 }
 
@@ -103,7 +111,7 @@ impl ProgressReader {
             (self.bytes_read % 100) as f32 / 100.0
         } else {
             self.bytes_read += n;
-            self.bytes_read as f32 / self.length as f32 * 100.0
+            self.bytes_read as f32 / self.length as f32
         };
 
         // Notify UI every 1MB

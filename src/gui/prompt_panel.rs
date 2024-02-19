@@ -1,10 +1,14 @@
 use super::*;
 
+const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
+const ROUNDING: f32 = 8.0;
+
 #[derive(Debug)]
 pub struct PromptPanel {
     prompt: String,
     prompt_field_id: Id,
     last_prompt_id: PromptId,
+    error: Option<String>,
     history: HistoryNavigator,
     frame_counter: usize,
     scroll_to_bottom: bool,
@@ -15,6 +19,7 @@ impl PromptPanel {
         Self {
             prompt_field_id: Id::new("prompt-id"),
             last_prompt_id: PromptId::default(),
+            error: None,
             prompt: Default::default(),
             history: HistoryNavigator::new(),
             frame_counter: 0,
@@ -44,6 +49,26 @@ impl PromptPanel {
 
         let state = text_edit::TextEditState::default();
         state.store(ctx, self.prompt_field_id);
+    }
+
+    fn error_window(&mut self, ctx: &Context) {
+        // Show error window if any.
+        if self.error.is_some() {
+            Window::new("Error")
+                .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.with_layout(Layout::top_down(Align::Center), |ui| {
+                        let msg = self.error.as_ref().unwrap();
+                        ui.label(RichText::new(msg).font(TEXT_FONT));
+                        ui.add_space(ui.spacing().item_spacing.y * 2.5);
+                        if ui.button("Close").clicked() {
+                            self.error = None;
+                        }
+                    });
+                });
+        }
     }
 }
 
@@ -141,10 +166,12 @@ impl Panel for PromptPanel {
             ui.allocate_space(ui.available_size());
         });
 
+        self.error_window(ctx);
+
         self.scroll_to_bottom = false;
     }
 
-    fn process_input(&mut self, ctx: &Context, app: &mut AppContext) {
+    fn handle_input(&mut self, ctx: &Context, app: &mut AppContext) {
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             app.generator.stop();
             self.reset_prompt(ctx, "".to_string());
@@ -165,15 +192,23 @@ impl Panel for PromptPanel {
         }
     }
 
-    fn message(&mut self, app: &mut AppContext, msg: &Message) {
-        if let Message::Token(prompt_id, s) = msg {
-            // Skip tokens from a previous prompt.
-            if self.last_prompt_id == *prompt_id {
-                if let Some(prompt) = app.state.history.last_mut() {
-                    prompt.reply.push_str(s);
-                    self.scroll_to_bottom = true;
+    fn handle_message(&mut self, app: &mut AppContext, msg: Message) {
+        match msg {
+            Message::Token(prompt_id, s) => {
+                // Skip tokens from a previous prompt.
+                if self.last_prompt_id == prompt_id {
+                    if let Some(prompt) = app.state.history.last_mut() {
+                        prompt.reply.push_str(&s);
+                        self.scroll_to_bottom = true;
+                    }
                 }
             }
+            Message::Error(s) => self.error = Some(s),
+            _ => {}
         }
+    }
+
+    fn next_panel(&mut self) -> Option<Box<dyn Panel>> {
+        None
     }
 }

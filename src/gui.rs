@@ -6,17 +6,14 @@ use serde::{Deserialize, Serialize};
 use crate::generator::{Generator, GeneratorMode, Message, PromptId};
 use bubble::{Bubble, BubbleContent};
 use history::HistoryNavigator;
-use prompt_panel::PromptPanel;
 
 mod bubble;
 mod config;
-mod error;
+mod gauge;
 mod help;
 mod history;
+mod load_panel;
 mod prompt_panel;
-
-const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
-const ROUNDING: f32 = 8.0;
 
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, Default, PartialEq)]
 enum UiMode {
@@ -64,8 +61,9 @@ struct Prompt {
 
 trait Panel: Debug {
     fn update(&mut self, ctx: &Context, app: &mut AppContext);
-    fn process_input(&mut self, ctx: &Context, app: &mut AppContext);
-    fn message(&mut self, _app: &mut AppContext, _msg: &Message) {}
+    fn handle_input(&mut self, ctx: &Context, app: &mut AppContext);
+    fn handle_message(&mut self, _app: &mut AppContext, _msg: Message);
+    fn next_panel(&mut self) -> Option<Box<dyn Panel>>;
 }
 
 #[derive(Debug)]
@@ -77,7 +75,6 @@ struct AppContext {
 #[derive(Debug)]
 pub struct App {
     ctx: AppContext,
-    error: Option<String>,
     show_config: bool,
     show_help: bool,
     active_panel: Box<dyn Panel>,
@@ -99,10 +96,9 @@ impl App {
 
         Self {
             ctx: state,
-            error: None,
             show_config: false,
             show_help: false,
-            active_panel: Box::new(PromptPanel::new()),
+            active_panel: Box::new(load_panel::LoadPanel::new()),
         }
     }
 }
@@ -120,26 +116,11 @@ impl eframe::App for App {
             self.ctx.generator.mode().description()
         )));
 
-        match self.ctx.generator.next_message() {
-            Some(m @ Message::Token(_, _)) => {
-                self.active_panel.message(&mut self.ctx, &m);
-            }
-            Some(Message::WeightsDownloadBegin) => {
-                println!("WeightsDownloadBegin");
-            }
-            Some(Message::WeightsDownloadProgress(pct)) => {
-                println!("WeightsDownloadProgress({pct})");
-            }
-            Some(Message::WeightsDownloadComplete) => {
-                println!("WeightsDownloadComplete");
-            }
-            Some(Message::Error(msg)) => {
-                self.error = Some(msg);
-            }
-            None => (),
+        if let Some(m) = self.ctx.generator.next_message() {
+            self.active_panel.handle_message(&mut self.ctx, m);
         };
 
-        self.active_panel.process_input(ctx, &mut self.ctx);
+        self.active_panel.handle_input(ctx, &mut self.ctx);
 
         // Render menu
         TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -154,11 +135,6 @@ impl eframe::App for App {
                         self.ctx.state.history.clear();
                         ui.close_menu();
                     }
-
-                    if ui.button("Reload weights").clicked() {
-                        self.ctx.generator.reload_weights();
-                        ui.close_menu();
-                    }
                 });
 
                 if ui.button("Help").clicked() {
@@ -171,8 +147,11 @@ impl eframe::App for App {
         self.active_panel.update(ctx, &mut self.ctx);
 
         self.config_window(ctx);
-        self.error_window(ctx);
         self.help_window(ctx);
+
+        if let Some(panel) = self.active_panel.next_panel() {
+            self.active_panel = panel;
+        }
 
         // Run 20 frames per second.
         ctx.request_repaint_after(std::time::Duration::from_millis(50));

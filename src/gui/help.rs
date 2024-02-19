@@ -1,5 +1,6 @@
 use super::*;
 
+const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
 const HELP_TEXT: &str = "# Prompt field
 
 Enter a prompt and press return to generate reply tokens. The prompts appear as

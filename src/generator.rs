@@ -123,8 +123,8 @@ pub enum Message {
     Token(PromptId, String),
     /// An error message.
     Error(String),
-    /// Weights download has started.
-    WeightsDownloadBegin,
+    /// Weights download has started for a model.
+    WeightsDownloadBegin(String),
     /// Weights download percent progress.
     WeightsDownloadProgress(f32),
     /// Weights download has completed.
@@ -296,10 +296,11 @@ fn load_model(
     reload: bool,
 ) -> Result<Transformer> {
     let cache = WeightsCache::new()?;
+    let _ = message_tx.send(Message::WeightsDownloadBegin(cache.model_name()));
 
+    let cache = WeightsCache::new()?;
     let weights_path = cache.weights_path();
     if !weights_path.exists() || reload {
-        let _ = message_tx.send(Message::WeightsDownloadBegin);
         cache.download_weights({
             let message_tx = message_tx.clone();
             let command_rx = command_rx.clone();
@@ -312,9 +313,18 @@ fn load_model(
                 }
             }
         })?;
-        let _ = message_tx.send(Message::WeightsDownloadComplete);
+    } else {
+        for pct in 0..=100 {
+            if command_rx.is_empty() {
+                let _ = message_tx.send(Message::WeightsDownloadProgress(pct as f32 / 100.0));
+            } else {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
+    let _ = message_tx.send(Message::WeightsDownloadComplete);
     Transformer::new(&weights_path)
 }
 
