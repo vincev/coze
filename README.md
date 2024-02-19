@@ -1,8 +1,8 @@
 # An egui app for prompting a local offline LLM.
 
 <p align="center">
-  <img alt="Model loading" src="media/loading.gif" height="400">
-  <img alt="Example prompt" src="media/prompt.gif" height="400">
+  <img alt="Model loading" src="media/loading.gif" height="300">
+  <img alt="Example prompt" src="media/prompt.gif" height="300">
 </p>
 
 ## Description
