@@ -9,10 +9,12 @@ use std::thread;
 use token_output_stream::TokenOutputStream;
 
 use transformer::Transformer;
+use weights_cache::WeightsCache;
 
 mod arcade100k;
 mod token_output_stream;
 mod transformer;
+mod weights_cache;
 
 /// Generator mode defines how tokens are choosen.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -107,6 +109,8 @@ enum Command {
     Prompt(PromptId, String),
     /// Update the generator configuration.
     Config(GeneratorMode),
+    /// Refresh weights
+    ReloadWeights,
     /// Stops token generation.
     Stop,
     /// Shutdown generator thread.
@@ -119,6 +123,12 @@ pub enum Message {
     Token(PromptId, String),
     /// An error message.
     Error(String),
+    /// Weights download has started for a model.
+    WeightsDownloadBegin(String),
+    /// Weights download percent progress.
+    WeightsDownloadProgress(f32),
+    /// Weights download has completed.
+    WeightsDownloadComplete,
 }
 
 /// Tokens generator.
@@ -165,6 +175,11 @@ impl Generator {
         self.last_prompt_id
     }
 
+    /// Refresh weights
+    pub fn reload_weights(&self) {
+        let _ = self.command_tx.send(Command::ReloadWeights);
+    }
+
     /// Returns the current config.
     pub fn mode(&self) -> GeneratorMode {
         self.mode
@@ -201,11 +216,11 @@ fn generator(
     command_rx: Receiver<Command>,
     message_tx: Sender<Message>,
 ) {
-    let mut model = match Transformer::new() {
-        Ok(model) => model,
+    let mut model = match load_model(&command_rx, &message_tx, false) {
+        Ok(model) => Some(model),
         Err(e) => {
             let _ = message_tx.send(Message::Error(e.to_string()));
-            return;
+            None
         }
     };
 
@@ -215,53 +230,102 @@ fn generator(
     while let Ok(cmd) = command_rx.recv() {
         match cmd {
             Command::Prompt(prompt_id, prompt) => 'prompt: {
-                tokenizer.clear();
-                model.reset();
+                if let Some(model) = model.as_mut() {
+                    tokenizer.clear();
+                    model.reset();
 
-                let mut tokens = tokenizer.encode(&prompt);
+                    let mut tokens = tokenizer.encode(&prompt);
 
-                for idx in 0..config.sample_max {
-                    let context_size = if idx > 0 { 1 } else { tokens.len() };
-                    let start_pos = tokens.len().saturating_sub(context_size);
-                    let result = generate_token(
-                        &tokens,
-                        start_pos,
-                        &config,
-                        &mut model,
-                        tokenizer.eos_token(),
-                    );
+                    for idx in 0..config.sample_max {
+                        let context_size = if idx > 0 { 1 } else { tokens.len() };
+                        let start_pos = tokens.len().saturating_sub(context_size);
+                        let result = generate_token(
+                            &tokens,
+                            start_pos,
+                            &config,
+                            model,
+                            tokenizer.eos_token(),
+                        );
 
-                    match result {
-                        Ok(None) => {
-                            // Generated eos_token
-                            break;
-                        }
-                        Ok(Some(token)) => {
-                            tokens.push(token);
-                            if let Ok(Some(token_str)) = tokenizer.next_token(token) {
-                                let _ = message_tx.send(Message::Token(prompt_id, token_str));
+                        match result {
+                            Ok(None) => {
+                                // Generated eos_token
+                                break;
+                            }
+                            Ok(Some(token)) => {
+                                tokens.push(token);
+                                if let Ok(Some(token_str)) = tokenizer.next_token(token) {
+                                    let _ = message_tx.send(Message::Token(prompt_id, token_str));
+                                }
+                            }
+                            Err(err) => {
+                                let _ = message_tx.send(Message::Error(err.to_string()));
                             }
                         }
-                        Err(err) => {
-                            let _ = message_tx.send(Message::Error(err.to_string()));
+
+                        // Skip remainining tokens if there is a new command.
+                        if !command_rx.is_empty() {
+                            break 'prompt;
                         }
                     }
 
-                    // Skip remainining tokens if there is a new command.
-                    if !command_rx.is_empty() {
-                        break 'prompt;
+                    if let Ok(Some(token_str)) = tokenizer.decode_rest() {
+                        let _ = message_tx.send(Message::Token(prompt_id, token_str));
                     }
-                }
-
-                if let Ok(Some(token_str)) = tokenizer.decode_rest() {
-                    let _ = message_tx.send(Message::Token(prompt_id, token_str));
                 }
             }
             Command::Config(value) => config = value.config(),
             Command::Stop => {}
+            Command::ReloadWeights => {
+                model = match load_model(&command_rx, &message_tx, true) {
+                    Ok(model) => Some(model),
+                    Err(e) => {
+                        let _ = message_tx.send(Message::Error(e.to_string()));
+                        model.or(None)
+                    }
+                };
+            }
             Command::Shutdown => break,
         }
     }
+}
+
+fn load_model(
+    command_rx: &Receiver<Command>,
+    message_tx: &Sender<Message>,
+    reload: bool,
+) -> Result<Transformer> {
+    let cache = WeightsCache::new()?;
+    let _ = message_tx.send(Message::WeightsDownloadBegin(cache.model_name()));
+
+    let cache = WeightsCache::new()?;
+    let weights_path = cache.weights_path();
+    if !weights_path.exists() || reload {
+        cache.download_weights({
+            let message_tx = message_tx.clone();
+            let command_rx = command_rx.clone();
+            move |pct| {
+                if command_rx.is_empty() {
+                    let _ = message_tx.send(Message::WeightsDownloadProgress(pct));
+                    true
+                } else {
+                    false
+                }
+            }
+        })?;
+    } else {
+        for pct in 0..=100 {
+            if command_rx.is_empty() {
+                let _ = message_tx.send(Message::WeightsDownloadProgress(pct as f32 / 100.0));
+            } else {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    let _ = message_tx.send(Message::WeightsDownloadComplete);
+    Transformer::new(&weights_path)
 }
 
 fn generate_token(

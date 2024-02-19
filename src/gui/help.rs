@@ -1,5 +1,6 @@
 use super::*;
 
+const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
 const HELP_TEXT: &str = "# Prompt field
 
 Enter a prompt and press return to generate reply tokens. The prompts appear as
@@ -24,9 +25,9 @@ area.
 The history and window position is saved using the `egui` storage system.";
 
 impl App {
-    pub fn help_window(&mut self) {
+    pub fn help_window(&mut self, ctx: &Context) {
         if self.show_help {
-            let ui_rect = self.ctx.used_rect();
+            let ui_rect = ctx.used_rect();
 
             Window::new("Help")
                 .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
@@ -34,7 +35,7 @@ impl App {
                 .max_height(ui_rect.height() * 0.8)
                 .collapsible(false)
                 .resizable(false)
-                .show(&self.ctx, |ui| {
+                .show(ctx, |ui| {
                     ScrollArea::vertical()
                         .max_height(ui_rect.height() * 0.8)
                         .show(ui, |ui| {

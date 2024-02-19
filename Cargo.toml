@@ -1,12 +1,11 @@
 [package]
 authors = ["Vince Vasta <vince.vasta@gmail.com>"]
-description = "An egui app for a local offline LLM model."
+description = "An egui app for playing with local open source LLM."
 edition = "2021"
-exclude = ["model/*.gguf"]
 license = "Apache-2.0"
 name = "coze"
 repository = "https://github.com/vincev/coze"
-version = "0.1.0"
+version = "0.1.1"
 
 [dependencies]
 anyhow = "1.0.79"
@@ -15,10 +14,13 @@ candle = { version = "0.3.3", default-features = false, package = "candle-core" 
 candle-nn = { version = "0.3.3", default-features = false }
 candle-transformers = { version = "0.3.3", default-features = false }
 crossbeam-channel = "0.5.11"
+dirs = "5.0.1"
 fancy-regex = "0.13.0"
+hf-hub = "0.3.2"
 rand = "0.8.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.113"
+ureq = "2.9.6"
 
 [dependencies.eframe]
 version = "0.26.0"
