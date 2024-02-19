@@ -63,7 +63,6 @@ jobs:
     - name: Prepare release archive
       run: |
         mkdir coze
-        cp model/*.gguf coze
         cp target/release/${{ matrix.binary }} coze
         tar cvf coze-${{ inputs.version }}-${{ matrix.os_label }}.tar coze
     - name: Upload build artifact
