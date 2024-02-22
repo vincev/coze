@@ -1,11 +1,11 @@
 [package]
 authors = ["Vince Vasta <vince.vasta@gmail.com>"]
-description = "An egui app for playing with local open source LLM."
+description = "An egui app for playing with a local open source LLM."
 edition = "2021"
 license = "Apache-2.0"
 name = "coze"
 repository = "https://github.com/vincev/coze"
-version = "0.1.2"
+version = "0.1.3"
 
 [dependencies]
 anyhow = "1.0.79"
