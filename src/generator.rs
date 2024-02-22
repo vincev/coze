@@ -125,6 +125,8 @@ pub enum Message {
     Error(String),
     /// Weights download has started for a model.
     WeightsDownloadBegin(String),
+    /// Weights download connection.
+    WeightsDownloadConnecting,
     /// Weights download percent progress.
     WeightsDownloadProgress(f32),
     /// Weights download has completed.
@@ -301,6 +303,7 @@ fn load_model(
     let cache = WeightsCache::new()?;
     let weights_path = cache.weights_path();
     if !weights_path.exists() || reload {
+        let _ = message_tx.send(Message::WeightsDownloadConnecting);
         cache.download_weights({
             let message_tx = message_tx.clone();
             let command_rx = command_rx.clone();
