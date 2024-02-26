@@ -3,17 +3,16 @@ use std::fmt::Debug;
 use eframe::egui::*;
 use serde::{Deserialize, Serialize};
 
-use crate::generator::{Generator, GeneratorMode, Message, PromptId};
-use bubble::{Bubble, BubbleContent};
-use history::HistoryNavigator;
+use crate::{
+    controller::{Controller, Message},
+    models::ModelConfig,
+};
 
-mod bubble;
 mod config;
 mod gauge;
 mod help;
-mod history;
 mod load_panel;
-mod prompt_panel;
+mod models_panel;
 
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, Default, PartialEq)]
 enum UiMode {
@@ -49,7 +48,7 @@ impl UiMode {
 #[derive(Deserialize, Serialize, Debug, Default)]
 struct PersistedState {
     history: Vec<Prompt>,
-    generator_mode: GeneratorMode,
+    model_config: ModelConfig,
     ui_mode: UiMode,
 }
 
@@ -60,16 +59,26 @@ struct Prompt {
 }
 
 trait Panel: Debug {
-    fn update(&mut self, ctx: &Context, app: &mut AppContext);
-    fn handle_input(&mut self, ctx: &Context, app: &mut AppContext);
-    fn handle_message(&mut self, _app: &mut AppContext, _msg: Message);
-    fn next_panel(&mut self) -> Option<Box<dyn Panel>>;
+    fn update(&mut self, ctx: &mut AppContext);
+
+    fn handle_input(&mut self, _ctx: &mut AppContext) {}
+
+    fn handle_message(&mut self, _ctx: &mut AppContext, _msg: Message) {}
+
+    fn next_panel(&mut self, _ctx: &mut AppContext) -> Option<Box<dyn Panel>> {
+        None
+    }
+
+    fn is_start_panel(&mut self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug)]
 struct AppContext {
     state: PersistedState,
-    generator: Generator,
+    controller: Controller,
+    egui_ctx: Context,
 }
 
 #[derive(Debug)]
@@ -91,14 +100,18 @@ impl App {
 
         cc.egui_ctx.set_visuals(state.ui_mode.visuals());
 
-        let generator = Generator::new(state.generator_mode);
-        let state = AppContext { state, generator };
+        let controller = Controller::new(state.model_config);
+        let state = AppContext {
+            state,
+            controller,
+            egui_ctx: cc.egui_ctx.clone(),
+        };
 
         Self {
             ctx: state,
             show_config: false,
             show_help: false,
-            active_panel: Box::new(load_panel::LoadPanel::new()),
+            active_panel: Box::new(models_panel::ModelsPanel::new()),
         }
     }
 }
@@ -113,18 +126,25 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         ctx.send_viewport_cmd(ViewportCommand::Title(format!(
             "Coze ({})",
-            self.ctx.generator.mode().description()
+            self.ctx.controller.model_config().description()
         )));
 
-        if let Some(m) = self.ctx.generator.next_message() {
+        if let Some(m) = self.ctx.controller.next_message() {
             self.active_panel.handle_message(&mut self.ctx, m);
         };
 
-        self.active_panel.handle_input(ctx, &mut self.ctx);
+        self.active_panel.handle_input(&mut self.ctx);
 
         // Render menu
         TopBottomPanel::top("top_panel").show(ctx, |ui| {
             menu::bar(ui, |ui| {
+                if !self.active_panel.is_start_panel() {
+                    let arrow = RichText::new("⬅").font(FontId::new(24.0, FontFamily::Monospace));
+                    if ui.add(Button::new(arrow).frame(false)).clicked() {
+                        self.active_panel = Box::new(models_panel::ModelsPanel::new());
+                    }
+                }
+
                 ui.menu_button("Edit", |ui| {
                     if ui.button("Config").clicked() {
                         self.show_config = true;
@@ -144,12 +164,12 @@ impl eframe::App for App {
             });
         });
 
-        self.active_panel.update(ctx, &mut self.ctx);
+        self.active_panel.update(&mut self.ctx);
 
         self.config_window(ctx);
         self.help_window(ctx);
 
-        if let Some(panel) = self.active_panel.next_panel() {
+        if let Some(panel) = self.active_panel.next_panel(&mut self.ctx) {
             self.active_panel = panel;
         }
 
@@ -158,6 +178,6 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.ctx.generator.shutdown();
+        self.ctx.controller.shutdown();
     }
 }

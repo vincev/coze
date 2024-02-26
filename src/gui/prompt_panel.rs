@@ -1,4 +1,13 @@
-use super::*;
+use eframe::egui::*;
+
+use crate::{
+    generator::{Message, PromptId},
+    gui::{
+        bubble::{Bubble, BubbleContent},
+        history::HistoryNavigator,
+        AppContext, Panel, Prompt,
+    },
+};
 
 const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
 const ROUNDING: f32 = 8.0;
@@ -206,9 +215,5 @@ impl Panel for PromptPanel {
             Message::Error(s) => self.error = Some(s),
             _ => {}
         }
-    }
-
-    fn next_panel(&mut self) -> Option<Box<dyn Panel>> {
-        None
     }
 }

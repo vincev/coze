@@ -1,6 +1,9 @@
-use crate::generator::GeneratorMode;
+use eframe::egui::*;
 
-use super::*;
+use crate::{
+    gui::{App, UiMode},
+    models::ModelConfig,
+};
 
 impl App {
     pub fn config_window(&mut self, ctx: &Context) {
@@ -18,24 +21,24 @@ impl App {
                         .show(ui, |ui| {
                             ui.label("Generator mode: ");
                             ComboBox::from_id_source("gm")
-                                .selected_text(self.ctx.state.generator_mode.description())
+                                .selected_text(self.ctx.state.model_config.description())
                                 .show_ui(ui, |ui| {
                                     ui.style_mut().wrap = Some(false);
                                     ui.set_min_width(60.0);
                                     ui.selectable_value(
-                                        &mut self.ctx.state.generator_mode,
-                                        GeneratorMode::Careful,
-                                        GeneratorMode::Careful.description(),
+                                        &mut self.ctx.state.model_config,
+                                        ModelConfig::Careful,
+                                        ModelConfig::Careful.description(),
                                     );
                                     ui.selectable_value(
-                                        &mut self.ctx.state.generator_mode,
-                                        GeneratorMode::Creative,
-                                        GeneratorMode::Creative.description(),
+                                        &mut self.ctx.state.model_config,
+                                        ModelConfig::Creative,
+                                        ModelConfig::Creative.description(),
                                     );
                                     ui.selectable_value(
-                                        &mut self.ctx.state.generator_mode,
-                                        GeneratorMode::Deranged,
-                                        GeneratorMode::Deranged.description(),
+                                        &mut self.ctx.state.model_config,
+                                        ModelConfig::Deranged,
+                                        ModelConfig::Deranged.description(),
                                     );
                                 });
                             ui.end_row();
@@ -65,7 +68,7 @@ impl App {
 
                     ui.vertical_centered(|ui| {
                         if ui.button("Close").clicked() {
-                            self.ctx.generator.set_config(self.ctx.state.generator_mode);
+                            self.ctx.controller.set_config(self.ctx.state.model_config);
                             self.show_config = false;
                         }
                     });
