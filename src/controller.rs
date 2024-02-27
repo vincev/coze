@@ -1,7 +1,8 @@
+use anyhow::Result;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::thread;
 
-use crate::models::{ModelConfig, ModelId};
+use crate::models::{ModelConfig, ModelId, ModelsCache};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PromptId(u32);
@@ -20,8 +21,8 @@ enum Command {
     Prompt(PromptId, String),
     /// Update the model configuration.
     Config(ModelConfig),
-    /// Refresh weights
-    ReloadWeights,
+    /// Refresh weights for the given model.
+    ReloadWeights(ModelId),
     /// Stops token generation.
     Stop,
     /// Shutdown generator thread.
@@ -35,13 +36,13 @@ pub enum Message {
     /// An error message.
     Error(String),
     /// Weights download has started for a model.
-    WeightsDownloadBegin(String),
+    DownloadBegin(String),
     /// Weights download connection.
-    WeightsDownloadConnecting,
+    DownloadConnecting,
     /// Weights download percent progress.
-    WeightsDownloadProgress(f32),
+    DownloadProgress(f32),
     /// Weights download has completed.
-    WeightsDownloadComplete,
+    DownloadComplete,
 }
 
 /// Tokens generator.
@@ -89,8 +90,8 @@ impl Controller {
     }
 
     /// Refreshes weights
-    pub fn reload_weights(&self) {
-        let _ = self.command_tx.send(Command::ReloadWeights);
+    pub fn reload_weights(&self, model_id: ModelId) {
+        let _ = self.command_tx.send(Command::ReloadWeights(model_id));
     }
 
     /// Loads the a model.
@@ -136,12 +137,75 @@ fn generator(
 ) {
     while let Ok(cmd) = command_rx.recv() {
         match cmd {
-            Command::LoadModel(model_id) => {}
+            Command::LoadModel(model_id) => {
+                match load_model(model_id, &command_rx, &message_tx, false) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        let _ = message_tx.send(Message::Error(e.to_string()));
+                    }
+                };
+            }
             Command::Prompt(prompt_id, prompt) => {}
             Command::Config(value) => model_config = value,
             Command::Stop => {}
-            Command::ReloadWeights => {}
+            Command::ReloadWeights(model_id) => {
+                match load_model(model_id, &command_rx, &message_tx, true) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        let _ = message_tx.send(Message::Error(e.to_string()));
+                    }
+                };
+            }
             Command::Shutdown => break,
         }
     }
+}
+
+fn load_model(
+    model_id: ModelId,
+    command_rx: &Receiver<Command>,
+    message_tx: &Sender<Message>,
+    reload: bool,
+) -> Result<()> {
+    let cache = ModelsCache::new()?;
+    let cached_model = cache.cached_model(model_id);
+
+    if !cached_model.cached() || reload {
+        let _ = message_tx.send(Message::DownloadBegin("Downloading Model".to_string()));
+        let _ = message_tx.send(Message::DownloadConnecting);
+
+        cached_model.download_model({
+            let message_tx = message_tx.clone();
+            let command_rx = command_rx.clone();
+            move |pct| {
+                if command_rx.is_empty() {
+                    let _ = message_tx.send(Message::DownloadProgress(pct));
+                    true
+                } else {
+                    false
+                }
+            }
+        })?;
+
+        if cached_model.has_tokenizer() {
+            let _ = message_tx.send(Message::DownloadBegin("Downloading Tokenizer".to_string()));
+            let _ = message_tx.send(Message::DownloadConnecting);
+
+            cached_model.download_tokenizer({
+                let message_tx = message_tx.clone();
+                let command_rx = command_rx.clone();
+                move |pct| {
+                    if command_rx.is_empty() {
+                        let _ = message_tx.send(Message::DownloadProgress(pct));
+                        true
+                    } else {
+                        false
+                    }
+                }
+            })?;
+        }
+    }
+
+    let _ = message_tx.send(Message::DownloadComplete);
+    Ok(())
 }

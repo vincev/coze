@@ -2,7 +2,7 @@ use eframe::egui::*;
 
 use crate::{
     gui::{load_panel::LoadPanel, AppContext, Panel},
-    models::{list_models, ModelId, ModelSpec},
+    models::{list_models, ModelId, ModelSpecs},
 };
 
 const ROUNDING: f32 = 8.0;
@@ -27,7 +27,7 @@ impl Panel for ModelsPanel {
                 .show(ui, |ui| {
                     let width = ui.available_width();
                     for model_id in list_models() {
-                        let spec = model_id.spec();
+                        let spec = model_id.specs();
                         let r = ui.add(
                             Button::new(spec_to_text(ui, spec))
                                 .rounding(ROUNDING)
@@ -55,7 +55,7 @@ impl Panel for ModelsPanel {
     }
 }
 
-fn spec_to_text(ui: &Ui, spec: ModelSpec) -> text::LayoutJob {
+fn spec_to_text(ui: &Ui, spec: ModelSpecs) -> text::LayoutJob {
     const PADDING: f32 = 10.0;
 
     let mut job = text::LayoutJob::default();

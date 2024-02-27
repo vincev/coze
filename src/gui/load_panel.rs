@@ -13,10 +13,12 @@ const PROGRESS_FONT: FontId = FontId::new(28.0, FontFamily::Monospace);
 pub struct LoadPanel {
     load_pct: f32,
     connecting: bool,
-    model_name: String,
+    download_msg: String,
     error: Option<String>,
     complete: bool,
     frame_counter: usize,
+    model_name: String,
+    model_id: ModelId,
 }
 
 impl LoadPanel {
@@ -26,10 +28,12 @@ impl LoadPanel {
         Self {
             load_pct: 0.0,
             connecting: false,
-            model_name: Default::default(),
+            download_msg: Default::default(),
             error: None,
             complete: false,
             frame_counter: 0,
+            model_name: model_id.specs().name.to_string(),
+            model_id,
         }
     }
 }
@@ -42,8 +46,8 @@ impl Panel for LoadPanel {
 
         CentralPanel::default().show(&ctx.egui_ctx, |ui| {
             ui.vertical_centered(|ui| {
-                ui.label(RichText::new("Loading Model").font(TEXT_FONT));
                 ui.label(RichText::new(&self.model_name).font(TEXT_FONT));
+                ui.label(RichText::new(&self.download_msg).font(TEXT_FONT));
 
                 ui.add_space(ui.spacing().item_spacing.y * 2.5);
 
@@ -92,7 +96,7 @@ impl Panel for LoadPanel {
                     .rounding(4.0);
 
                     if ui.add(button).clicked() {
-                        ctx.controller.reload_weights();
+                        ctx.controller.reload_weights(self.model_id);
                         self.error = None;
                     }
                 }
@@ -102,13 +106,13 @@ impl Panel for LoadPanel {
 
     fn handle_message(&mut self, _ctx: &mut AppContext, msg: Message) {
         match msg {
-            Message::WeightsDownloadBegin(s) => self.model_name = s,
-            Message::WeightsDownloadConnecting => self.connecting = true,
-            Message::WeightsDownloadProgress(pct) => {
+            Message::DownloadBegin(s) => self.download_msg = s,
+            Message::DownloadConnecting => self.connecting = true,
+            Message::DownloadProgress(pct) => {
                 self.connecting = false;
                 self.load_pct = pct;
             }
-            Message::WeightsDownloadComplete => self.complete = true,
+            Message::DownloadComplete => self.complete = true,
             Message::Error(s) => self.error = Some(s),
             _ => {}
         }
