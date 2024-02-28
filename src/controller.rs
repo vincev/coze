@@ -170,7 +170,7 @@ fn load_model(
     let cache = ModelsCache::new()?;
     let cached_model = cache.cached_model(model_id);
 
-    if !cached_model.is_cached() || reload {
+    if !cached_model.is_model_cached() || reload {
         let _ = message_tx.send(Message::DownloadBegin("Downloading Model".to_string()));
         let _ = message_tx.send(Message::DownloadConnecting);
 
@@ -186,24 +186,24 @@ fn load_model(
                 }
             }
         })?;
+    }
 
-        if cached_model.has_tokenizer() {
-            let _ = message_tx.send(Message::DownloadBegin("Downloading Tokenizer".to_string()));
-            let _ = message_tx.send(Message::DownloadConnecting);
+    if !cached_model.is_tokenizer_cached() || reload {
+        let _ = message_tx.send(Message::DownloadBegin("Downloading Tokenizer".to_string()));
+        let _ = message_tx.send(Message::DownloadConnecting);
 
-            cached_model.download_tokenizer({
-                let message_tx = message_tx.clone();
-                let command_rx = command_rx.clone();
-                move |pct| {
-                    if command_rx.is_empty() {
-                        let _ = message_tx.send(Message::DownloadProgress(pct));
-                        true
-                    } else {
-                        false
-                    }
+        cached_model.download_tokenizer({
+            let message_tx = message_tx.clone();
+            let command_rx = command_rx.clone();
+            move |pct| {
+                if command_rx.is_empty() {
+                    let _ = message_tx.send(Message::DownloadProgress(pct));
+                    true
+                } else {
+                    false
                 }
-            })?;
-        }
+            }
+        })?;
     }
 
     let _ = message_tx.send(Message::DownloadComplete);

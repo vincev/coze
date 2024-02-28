@@ -66,10 +66,20 @@ pub struct CachedModel {
 impl CachedModel {
     /// Checks if this model has been cached to disk.
     pub fn is_cached(&self) -> bool {
+        self.is_model_cached() && self.is_tokenizer_cached()
+    }
+
+    /// Checks if this model file is cached.
+    pub fn is_model_cached(&self) -> bool {
+        self.model_path.exists()
+    }
+
+    /// Checks if this model tokenizer file is cached.
+    pub fn is_tokenizer_cached(&self) -> bool {
         if self.tokenizer_path.as_os_str().is_empty() {
-            self.model_path.exists()
+            true
         } else {
-            self.model_path.exists() && self.tokenizer_path.exists()
+            self.tokenizer_path.exists()
         }
     }
 
