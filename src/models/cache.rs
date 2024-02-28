@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::models::{ModelId, ModelSpecs};
+use crate::models::{ModelId, ModelSpec};
 
 const MODELS_PATH: &str = "models";
 
@@ -31,12 +31,12 @@ impl ModelsCache {
     ///
     /// The model may be empty and needs to be downloaded.
     pub fn cached_model(&self, model_id: ModelId) -> CachedModel {
-        let specs = model_id.specs();
+        let spec = model_id.spec();
 
-        let cache_path = self.cache_dir.join(MODELS_PATH).join(specs.cache_dir);
-        let model_path = cache_path.join(specs.model_filename);
-        let tokenizer_path = if !specs.tokenizer_filename.is_empty() {
-            cache_path.join(specs.tokenizer_filename)
+        let cache_path = self.cache_dir.join(MODELS_PATH).join(spec.cache_dir);
+        let model_path = cache_path.join(spec.model_filename);
+        let tokenizer_path = if !spec.tokenizer_filename.is_empty() {
+            cache_path.join(spec.tokenizer_filename)
         } else {
             PathBuf::new()
         };
@@ -45,7 +45,7 @@ impl ModelsCache {
             cache_path,
             model_path,
             tokenizer_path,
-            specs,
+            spec,
         }
     }
 }
@@ -60,12 +60,12 @@ pub struct CachedModel {
     /// Tokenizer file path, may be empty for models without a tokenizer.
     pub tokenizer_path: PathBuf,
     /// Model specifications.
-    pub specs: ModelSpecs,
+    pub spec: ModelSpec,
 }
 
 impl CachedModel {
     /// Checks if this model has been cached to disk.
-    pub fn cached(&self) -> bool {
+    pub fn is_cached(&self) -> bool {
         if self.tokenizer_path.as_os_str().is_empty() {
             self.model_path.exists()
         } else {
@@ -86,8 +86,8 @@ impl CachedModel {
             .map_err(|e| anyhow!("Hub api error: {e}"))?;
 
         let weights_url = api
-            .model(self.specs.model_repo.to_string())
-            .url(self.specs.model_filename);
+            .model(self.spec.model_repo.to_string())
+            .url(self.spec.model_filename);
 
         download_from_repo(weights_url, &self.model_path, update_fn)
     }
@@ -109,8 +109,8 @@ impl CachedModel {
                 .map_err(|e| anyhow!("Hub api error: {e}"))?;
 
             let weights_url = api
-                .model(self.specs.tokenizer_repo.to_string())
-                .url(self.specs.tokenizer_filename);
+                .model(self.spec.tokenizer_repo.to_string())
+                .url(self.spec.tokenizer_filename);
 
             download_from_repo(weights_url, &self.tokenizer_path, update_fn)?;
         }
@@ -120,7 +120,7 @@ impl CachedModel {
 
     /// Check if this model has a tokenizer
     pub fn has_tokenizer(&self) -> bool {
-        !self.specs.tokenizer_filename.is_empty()
+        !self.spec.tokenizer_filename.is_empty()
     }
 }
 

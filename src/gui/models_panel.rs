@@ -2,7 +2,7 @@ use eframe::egui::*;
 
 use crate::{
     gui::{load_panel::LoadPanel, AppContext, Panel},
-    models::{list_models, ModelId, ModelSpecs},
+    models::{ModelId, ModelSpec, ModelsCache},
 };
 
 const ROUNDING: f32 = 8.0;
@@ -10,11 +10,28 @@ const ROUNDING: f32 = 8.0;
 #[derive(Debug)]
 pub struct ModelsPanel {
     selected: Option<ModelId>,
+    models: Vec<ModelData>,
 }
 
 impl ModelsPanel {
     pub fn new() -> Self {
-        Self { selected: None }
+        let models = ModelId::models()
+            .into_iter()
+            .map(|model_id| {
+                let spec = model_id.spec();
+                // Checks if this model is cached on disk, this is done once at
+                // construction time to avoid accessing the disk at every frame.
+                let cached = ModelsCache::new()
+                    .map(|c| c.cached_model(model_id).is_cached())
+                    .unwrap_or(false);
+                ModelData { spec, cached }
+            })
+            .collect();
+
+        Self {
+            selected: None,
+            models,
+        }
     }
 }
 
@@ -26,16 +43,10 @@ impl Panel for ModelsPanel {
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
                     let width = ui.available_width();
-                    for model_id in list_models() {
-                        let spec = model_id.specs();
-                        let r = ui.add(
-                            Button::new(spec_to_text(ui, spec))
-                                .rounding(ROUNDING)
-                                .wrap(true)
-                                .min_size(Vec2::new(width, 120.0)),
-                        );
+                    for model in &self.models {
+                        let r = ui.add(model.button(ui).min_size(Vec2::new(width, 120.0)));
                         if r.clicked() {
-                            self.selected = Some(model_id);
+                            self.selected = Some(model.spec.model_id);
                         }
                     }
                 })
@@ -55,47 +66,31 @@ impl Panel for ModelsPanel {
     }
 }
 
-fn spec_to_text(ui: &Ui, spec: ModelSpecs) -> text::LayoutJob {
-    const PADDING: f32 = 10.0;
+#[derive(Debug)]
+struct ModelData {
+    spec: ModelSpec,
+    cached: bool,
+}
 
-    let mut job = text::LayoutJob::default();
+impl ModelData {
+    fn button(&self, ui: &Ui) -> Button<'_> {
+        const PADDING: f32 = 10.0;
 
-    let font_id = FontId::new(22.0, FontFamily::Monospace);
-    job.append(
-        spec.name,
-        PADDING,
-        TextFormat {
-            font_id: font_id.clone(),
-            color: ui.visuals().text_color(),
-            ..Default::default()
-        },
-    );
+        let mut job = text::LayoutJob::default();
 
-    job.append(
-        "\n\n",
-        PADDING,
-        TextFormat {
-            font_id,
-            color: ui.visuals().text_color(),
-            ..Default::default()
-        },
-    );
-
-    let font_id = FontId::new(18.0, FontFamily::Monospace);
-
-    job.append(
-        &format!("Size: {}G", spec.size / (1 << 20)),
-        PADDING,
-        TextFormat {
-            font_id: font_id.clone(),
-            color: ui.visuals().text_color(),
-            ..Default::default()
-        },
-    );
-
-    if spec.cached {
+        let font_id = FontId::new(22.0, FontFamily::Monospace);
         job.append(
-            "(Cached)",
+            self.spec.name,
+            PADDING,
+            TextFormat {
+                font_id: font_id.clone(),
+                color: ui.visuals().text_color(),
+                ..Default::default()
+            },
+        );
+
+        job.append(
+            "\n\n",
             PADDING,
             TextFormat {
                 font_id,
@@ -103,7 +98,31 @@ fn spec_to_text(ui: &Ui, spec: ModelSpecs) -> text::LayoutJob {
                 ..Default::default()
             },
         );
-    }
 
-    job
+        let font_id = FontId::new(18.0, FontFamily::Monospace);
+
+        job.append(
+            &format!("Size: {}G", self.spec.size / (1 << 20)),
+            PADDING,
+            TextFormat {
+                font_id: font_id.clone(),
+                color: ui.visuals().text_color(),
+                ..Default::default()
+            },
+        );
+
+        if self.cached {
+            job.append(
+                "(Cached)",
+                PADDING,
+                TextFormat {
+                    font_id,
+                    color: ui.visuals().text_color(),
+                    ..Default::default()
+                },
+            );
+        }
+
+        Button::new(job).rounding(ROUNDING).wrap(true)
+    }
 }

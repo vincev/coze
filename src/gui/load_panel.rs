@@ -32,7 +32,7 @@ impl LoadPanel {
             error: None,
             complete: false,
             frame_counter: 0,
-            model_name: model_id.specs().name.to_string(),
+            model_name: model_id.spec().name.to_string(),
             model_id,
         }
     }

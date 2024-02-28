@@ -170,7 +170,7 @@ fn load_model(
     let cache = ModelsCache::new()?;
     let cached_model = cache.cached_model(model_id);
 
-    if !cached_model.cached() || reload {
+    if !cached_model.is_cached() || reload {
         let _ = message_tx.send(Message::DownloadBegin("Downloading Model".to_string()));
         let _ = message_tx.send(Message::DownloadConnecting);
 
