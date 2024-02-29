@@ -8,11 +8,14 @@ use crate::{
     models::ModelConfig,
 };
 
+mod bubble;
 mod config;
 mod gauge;
 mod help;
+mod history;
 mod load_panel;
 mod models_panel;
+mod prompt_panel;
 
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, Default, PartialEq)]
 enum UiMode {

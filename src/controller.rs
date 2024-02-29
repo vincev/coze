@@ -2,7 +2,7 @@ use anyhow::Result;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::thread;
 
-use crate::models::{ModelConfig, ModelId, ModelsCache};
+use crate::models::{Model, ModelConfig, ModelId, ModelParams, ModelsCache};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PromptId(u32);
@@ -65,7 +65,7 @@ impl Controller {
         let (message_tx, message_rx) = bounded(1024);
 
         let task = thread::spawn(move || {
-            generator(model_config, command_rx, message_tx);
+            message_loop(model_config, command_rx, message_tx);
         });
 
         Self {
@@ -81,10 +81,9 @@ impl Controller {
     pub fn send_prompt(&mut self, prompt: &str) -> PromptId {
         self.last_prompt_id = self.last_prompt_id.inc();
 
-        let template = format!("<|user|>\n{prompt}<|endoftext|>\n<|assistant|>\n");
         let _ = self
             .command_tx
-            .send(Command::Prompt(self.last_prompt_id, template));
+            .send(Command::Prompt(self.last_prompt_id, prompt.to_string()));
 
         self.last_prompt_id
     }
@@ -130,27 +129,66 @@ impl Controller {
     }
 }
 
-fn generator(
-    mut model_config: ModelConfig,
+fn message_loop(
+    model_config: ModelConfig,
     command_rx: Receiver<Command>,
     message_tx: Sender<Message>,
 ) {
+    let mut model: Option<Box<dyn Model>> = None;
+    let mut model_params = model_config.params();
+
     while let Ok(cmd) = command_rx.recv() {
         match cmd {
             Command::LoadModel(model_id) => {
-                match load_model(model_id, &command_rx, &message_tx, false) {
-                    Ok(_) => {}
+                match load_model(
+                    model_id,
+                    model_config.params(),
+                    &command_rx,
+                    &message_tx,
+                    false,
+                ) {
+                    Ok(m) => model = Some(m),
                     Err(e) => {
                         let _ = message_tx.send(Message::Error(e.to_string()));
                     }
                 };
             }
-            Command::Prompt(prompt_id, prompt) => {}
-            Command::Config(value) => model_config = value,
+            Command::Prompt(prompt_id, prompt) => {
+                if let Some(model) = model.as_mut() {
+                    if let Err(e) = model.prompt(&prompt, &model_params) {
+                        let _ = message_tx.send(Message::Error(e.to_string()));
+                    } else {
+                        loop {
+                            match model.next() {
+                                Ok(Some(token_str)) => {
+                                    let _ = message_tx.send(Message::Token(prompt_id, token_str));
+                                }
+                                Ok(None) => break,
+                                Err(e) => {
+                                    let _ = message_tx.send(Message::Error(e.to_string()));
+                                    break;
+                                }
+                            }
+
+                            // Skip remainining tokens if there is a new command.
+                            if !command_rx.is_empty() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            Command::Config(config) => model_params = config.params(),
             Command::Stop => {}
             Command::ReloadWeights(model_id) => {
-                match load_model(model_id, &command_rx, &message_tx, true) {
-                    Ok(_) => {}
+                match load_model(
+                    model_id,
+                    model_config.params(),
+                    &command_rx,
+                    &message_tx,
+                    true,
+                ) {
+                    Ok(m) => model = Some(m),
                     Err(e) => {
                         let _ = message_tx.send(Message::Error(e.to_string()));
                     }
@@ -163,10 +201,11 @@ fn generator(
 
 fn load_model(
     model_id: ModelId,
+    params: ModelParams,
     command_rx: &Receiver<Command>,
     message_tx: &Sender<Message>,
     reload: bool,
-) -> Result<()> {
+) -> Result<Box<dyn Model>> {
     let cache = ModelsCache::new()?;
     let cached_model = cache.cached_model(model_id);
 
@@ -207,5 +246,5 @@ fn load_model(
     }
 
     let _ = message_tx.send(Message::DownloadComplete);
-    Ok(())
+    model_id.model(params)
 }

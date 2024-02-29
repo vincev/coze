@@ -1,14 +1,18 @@
 //! Models configuration and loading.
 use anyhow::Result;
+use candle::Tensor;
+use rand::prelude::*;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use strum::{EnumIter, IntoEnumIterator};
 
 pub use cache::ModelsCache;
-pub use config::ModelConfig;
+pub use config::{ModelConfig, ModelParams};
+use qstablelm::QStableLM;
 
 mod cache;
 mod config;
-mod llama;
-mod stablelm;
+mod qstablelm;
 
 #[derive(Debug, Clone, Copy, EnumIter)]
 pub enum ModelId {
@@ -60,10 +64,10 @@ impl ModelId {
     }
 
     /// Create a model instance.
-    pub fn model(&self) -> impl Model {
+    pub fn model(&self, params: ModelParams) -> Result<Box<dyn Model>> {
         match self {
-            ModelId::StableLm2Zephyr => DummyModel,
-            ModelId::Mistral7bInstructV02 => DummyModel,
+            ModelId::StableLm2Zephyr => Ok(Box::new(QStableLM::new(params)?)),
+            ModelId::Mistral7bInstructV02 => todo!(),
             ModelId::Zephyr7bBeta => todo!(),
         }
     }
@@ -93,7 +97,7 @@ pub struct ModelSpec {
 /// Interface to an inference model.
 pub trait Model {
     /// Initialize the model with a prompt.
-    fn prompt(&mut self) -> Result<()>;
+    fn prompt(&mut self, prompt: &str, params: &ModelParams) -> Result<()>;
 
     /// Get the next token.
     ///
@@ -101,14 +105,54 @@ pub trait Model {
     fn next(&mut self) -> Result<Option<String>>;
 }
 
-struct DummyModel;
+/// Sample a token from the given logits tensor.
+pub fn sample_token(logits: &Tensor, params: &ModelParams) -> Result<u32> {
+    #[derive(PartialEq, Debug)]
+    struct HeapVal(f32);
 
-impl Model for DummyModel {
-    fn prompt(&mut self) -> Result<()> {
-        todo!()
+    impl Eq for HeapVal {}
+
+    impl PartialOrd for HeapVal {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
     }
 
-    fn next(&mut self) -> Result<Option<String>> {
-        todo!()
+    impl Ord for HeapVal {
+        fn cmp(&self, other: &HeapVal) -> Ordering {
+            other.0.partial_cmp(&self.0).unwrap_or(Ordering::Greater)
+        }
     }
+
+    let logits_v: Vec<f32> = logits.to_vec1()?;
+
+    let mut heap = BinaryHeap::with_capacity(params.top_k);
+    for (idx, v) in logits_v.iter().enumerate() {
+        heap.push((HeapVal(*v), idx));
+        if heap.len() > params.top_k {
+            heap.pop();
+        }
+    }
+
+    let max_logit = heap
+        .iter()
+        .max_by(|(u, _), (v, _)| u.cmp(v))
+        .map(|(l, _)| l.0)
+        .unwrap();
+
+    let (exp_logits, tokens): (Vec<_>, Vec<_>) = heap
+        .into_iter()
+        .map(|(l, t)| (((l.0 - max_logit) / params.temperature).exp(), t))
+        .unzip();
+
+    let total = exp_logits.iter().sum::<f32>();
+    let softmax = exp_logits
+        .into_iter()
+        .map(|v| v / total)
+        .collect::<Vec<_>>();
+
+    let mut rng = rand::thread_rng();
+    let distr = rand::distributions::WeightedIndex::new(softmax)?;
+    let next_token = tokens[distr.sample(&mut rng)];
+    Ok(next_token as u32)
 }

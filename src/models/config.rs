@@ -22,7 +22,7 @@ impl ModelConfig {
         }
     }
 
-    fn config(&self) -> ModelParams {
+    pub fn params(&self) -> ModelParams {
         match self {
             ModelConfig::Careful => ModelParams::careful(),
             ModelConfig::Creative => ModelParams::creative(),
@@ -33,17 +33,15 @@ impl ModelConfig {
 
 /// Model configuration parameters.
 #[derive(Debug, Clone, Copy)]
-struct ModelParams {
+pub struct ModelParams {
     /// Best K tokens
-    top_k: usize,
+    pub top_k: usize,
     /// Temperature (higher value flattens token probabilities).
-    temperature: f32,
+    pub temperature: f32,
     /// Penalty to be applied for repeating tokens, 1. means no penalty.
-    repeat_penalty: f32,
+    pub repeat_penalty: f32,
     /// The context size to consider for the repeat penalty.
-    repeat_last_n: usize,
-    /// The maximum sample length.
-    sample_max: u32,
+    pub repeat_last_n: usize,
 }
 
 impl ModelParams {
@@ -53,7 +51,6 @@ impl ModelParams {
             temperature: 1.,
             repeat_penalty: 1.2,
             repeat_last_n: 64,
-            sample_max: 2048,
         }
     }
 
@@ -63,7 +60,6 @@ impl ModelParams {
             temperature: 2.,
             repeat_penalty: 1.2,
             repeat_last_n: 64,
-            sample_max: 2048,
         }
     }
 
@@ -73,7 +69,6 @@ impl ModelParams {
             temperature: 5.,
             repeat_penalty: 2.,
             repeat_last_n: 128,
-            sample_max: 2048,
         }
     }
 }

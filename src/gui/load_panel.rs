@@ -2,7 +2,7 @@ use eframe::egui::*;
 
 use crate::{
     controller::Message,
-    gui::{gauge::Gauge, AppContext, Panel},
+    gui::{gauge::Gauge, prompt_panel::PromptPanel, AppContext, Panel},
     models::ModelId,
 };
 
@@ -118,11 +118,11 @@ impl Panel for LoadPanel {
         }
     }
 
-    fn next_panel(&mut self, ctx: &mut AppContext) -> Option<Box<dyn Panel>> {
-        // if self.complete {
-        //     Some(Box::new(prompt_panel::PromptPanel::new()))
-        // } else {
-        None
-        // }
+    fn next_panel(&mut self, _ctx: &mut AppContext) -> Option<Box<dyn Panel>> {
+        if self.complete {
+            Some(Box::new(PromptPanel::new()))
+        } else {
+            None
+        }
     }
 }
