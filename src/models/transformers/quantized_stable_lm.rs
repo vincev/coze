@@ -1,43 +1,16 @@
-// use anyhow::Result;
+// This is a copy of:
+//
+// https://github.com/huggingface/candle/blob/main/candle-transformers/src/models/quantized_stable_lm.rs
+//
+// with some changes to rerun the same model instance on a new prompt (clear_kv_cache).
 use candle::{DType, Device, Module, Result, Tensor, D};
 use candle_nn::{Activation, LayerNorm};
 use candle_transformers::{
     quantized_nn::{layer_norm, linear, linear_no_bias, Embedding, Linear},
     quantized_var_builder::VarBuilder,
 };
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
-#[derive(Debug)]
-pub struct Transformer {
-    model: StableLM,
-}
-
-impl Transformer {
-    pub fn new(weights_path: &Path) -> anyhow::Result<Self> {
-        let device = Device::Cpu;
-        let vb = VarBuilder::from_gguf(weights_path, &device)?;
-        let config = Config::new();
-        let model = StableLM::new(&config, vb)?;
-
-        Ok(Self { model })
-    }
-
-    /// Resets the model before a new prompt.
-    pub fn reset(&mut self) {
-        self.model.reset();
-    }
-
-    /// Runs the model forward pass.
-    pub fn forward(&mut self, input_ids: &Tensor, seqlen_offset: usize) -> Result<Tensor> {
-        self.model.forward(input_ids, seqlen_offset)
-    }
-}
-
-// The following model is a copy from:
-//
-// https://github.com/huggingface/candle/blob/main/candle-transformers/src/models/quantized_stable_lm.rs
-//
-// with some changes to rerun the same model instance on a new prompt.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct Config {
     pub vocab_size: usize,
@@ -218,7 +191,7 @@ impl Attention {
         })
     }
 
-    fn reset(&mut self) {
+    fn clear_kv_cache(&mut self) {
         self.kv_cache = None;
     }
 
@@ -326,8 +299,8 @@ impl DecoderLayer {
         })
     }
 
-    fn reset(&mut self) {
-        self.self_attn.reset();
+    fn clear_kv_cache(&mut self) {
+        self.self_attn.clear_kv_cache();
     }
 
     fn forward(
@@ -347,7 +320,7 @@ impl DecoderLayer {
 }
 
 #[derive(Debug, Clone)]
-pub struct StableLM {
+pub struct Transformer {
     embed_tokens: Embedding,
     layers: Vec<DecoderLayer>,
     norm: LayerNorm,
@@ -355,16 +328,18 @@ pub struct StableLM {
     device: Device,
 }
 
-impl StableLM {
-    pub fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
+impl Transformer {
+    pub fn new(vb: VarBuilder) -> Result<Self> {
+        let cfg = Config::new();
+
         let vb_m = vb.pp("model");
         let embed_tokens =
             Embedding::new(cfg.vocab_size, cfg.hidden_size, vb_m.pp("embed_tokens"))?;
-        let rotary_emb = Arc::new(RotaryEmbedding::new(DType::F32, cfg, vb_m.device())?);
+        let rotary_emb = Arc::new(RotaryEmbedding::new(DType::F32, &cfg, vb_m.device())?);
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         let vb_l = vb_m.pp("layers");
         for layer_idx in 0..cfg.num_hidden_layers {
-            let layer = DecoderLayer::new(rotary_emb.clone(), cfg, vb_l.pp(layer_idx))?;
+            let layer = DecoderLayer::new(rotary_emb.clone(), &cfg, vb_l.pp(layer_idx))?;
             layers.push(layer)
         }
         let norm = layer_norm(cfg.hidden_size, cfg.norm_eps, vb_m.pp("norm"))?;
@@ -417,9 +392,9 @@ impl StableLM {
     }
 
     /// Resets the mode for a new prompt.
-    pub fn reset(&mut self) {
+    pub fn clear_kv_cache(&mut self) {
         for layer in &mut self.layers {
-            layer.reset();
+            layer.clear_kv_cache();
         }
     }
 }

@@ -1,4 +1,14 @@
-use super::*;
+use eframe::egui::*;
+
+use crate::{
+    controller::{Message, PromptId},
+    gui::{
+        bubble::{Bubble, BubbleContent},
+        history::HistoryNavigator,
+        AppContext, Panel, Prompt,
+    },
+    models::ModelId,
+};
 
 const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
 const ROUNDING: f32 = 8.0;
@@ -12,10 +22,11 @@ pub struct PromptPanel {
     history: HistoryNavigator,
     frame_counter: usize,
     scroll_to_bottom: bool,
+    model_id: ModelId,
 }
 
 impl PromptPanel {
-    pub fn new() -> Self {
+    pub fn new(model_id: ModelId) -> Self {
         Self {
             prompt_field_id: Id::new("prompt-id"),
             last_prompt_id: PromptId::default(),
@@ -24,23 +35,24 @@ impl PromptPanel {
             history: HistoryNavigator::new(),
             frame_counter: 0,
             scroll_to_bottom: false,
+            model_id,
         }
     }
 
-    fn send_prompt(&mut self, ctx: &Context, app: &mut AppContext) {
+    fn send_prompt(&mut self, ctx: &mut AppContext) {
         let prompt = self.prompt.trim();
         if !prompt.is_empty() {
             // Flush tokens from previous prompt
-            while app.generator.next_message().is_some() {}
+            while ctx.controller.next_message().is_some() {}
 
-            self.last_prompt_id = app.generator.send_prompt(prompt);
-            app.state.history.push(Prompt {
+            self.last_prompt_id = ctx.controller.send_prompt(prompt);
+            ctx.state.history.push(Prompt {
                 prompt: prompt.to_owned(),
                 reply: Default::default(),
             });
         }
 
-        self.reset_prompt(ctx, "".to_string());
+        self.reset_prompt(&ctx.egui_ctx, "".to_string());
         self.history.reset(&self.prompt);
     }
 
@@ -73,11 +85,19 @@ impl PromptPanel {
 }
 
 impl Panel for PromptPanel {
-    fn update(&mut self, ctx: &Context, app: &mut AppContext) {
+    fn update(&mut self, ctx: &mut AppContext) {
+        ctx.egui_ctx
+            .send_viewport_cmd(ViewportCommand::Title(format!(
+                "{} ({})",
+                self.model_id.spec().name,
+                ctx.controller.model_config().description(),
+            )));
+
         self.frame_counter += 1;
 
+        let egui_ctx = ctx.egui_ctx.clone();
         let prompt_frame = Frame::none()
-            .fill(ctx.style().visuals.window_fill)
+            .fill(ctx.egui_ctx.style().visuals.window_fill)
             .outer_margin(Margin::same(0.0))
             .inner_margin(Margin::same(10.0));
 
@@ -85,16 +105,16 @@ impl Panel for PromptPanel {
         TopBottomPanel::bottom("bottom_panel")
             .show_separator_line(false)
             .frame(prompt_frame)
-            .show(ctx, |ui| {
+            .show(&egui_ctx, |ui| {
                 Frame::group(ui.style())
                     .rounding(Rounding::same(ROUNDING))
-                    .fill(app.state.ui_mode.fill_color())
+                    .fill(ctx.state.ui_mode.fill_color())
                     .show(ui, |ui| {
-                        ctx.memory_mut(|m| m.request_focus(self.prompt_field_id));
+                        egui_ctx.memory_mut(|m| m.request_focus(self.prompt_field_id));
 
                         // Override multiline Enter behavior
                         if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
-                            self.send_prompt(ctx, app);
+                            self.send_prompt(ctx);
                             self.scroll_to_bottom = true;
                         }
 
@@ -115,16 +135,17 @@ impl Panel for PromptPanel {
             });
 
         // Render message panel.
-        CentralPanel::default().show(ctx, |ui| {
+        CentralPanel::default().show(&egui_ctx, |ui| {
             ScrollArea::vertical()
                 .auto_shrink(false)
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    for prompt in &app.state.history {
+                    let mut iter = ctx.state.history.iter().peekable();
+                    while let Some(prompt) = iter.next() {
                         let r = ui.add(Bubble::new(
                             &prompt.prompt,
                             BubbleContent::Prompt,
-                            app.state.ui_mode,
+                            ctx.state.ui_mode,
                         ));
                         if r.clicked() {
                             ui.ctx().copy_text(prompt.prompt.clone());
@@ -141,7 +162,7 @@ impl Panel for PromptPanel {
                             let r = ui.add(Bubble::new(
                                 &prompt.reply,
                                 BubbleContent::Reply,
-                                app.state.ui_mode,
+                                ctx.state.ui_mode,
                             ));
                             if r.clicked() {
                                 ui.ctx().copy_text(prompt.reply.clone());
@@ -149,12 +170,15 @@ impl Panel for PromptPanel {
 
                             ui.add_space(ui.spacing().item_spacing.y * 2.5);
                         } else {
-                            let dots = ["⏺   ", " ⏺  ", "  ⏺ ", "   ⏺", "  ⏺ ", " ⏺  "];
-                            ui.add(Bubble::new(
-                                dots[(self.frame_counter / 18) % dots.len()],
-                                BubbleContent::Reply,
-                                app.state.ui_mode,
-                            ));
+                            // Show waiting animation for last entry.
+                            if iter.peek().is_none() {
+                                let dots = ["⏺   ", " ⏺  ", "  ⏺ ", "   ⏺", "  ⏺ ", " ⏺  "];
+                                ui.add(Bubble::new(
+                                    dots[(self.frame_counter / 18) % dots.len()],
+                                    BubbleContent::Reply,
+                                    ctx.state.ui_mode,
+                                ));
+                            }
                             ui.add_space(ui.spacing().item_spacing.y * 2.5);
                         }
                     }
@@ -166,28 +190,37 @@ impl Panel for PromptPanel {
             ui.allocate_space(ui.available_size());
         });
 
-        self.error_window(ctx);
+        self.error_window(&egui_ctx);
 
         self.scroll_to_bottom = false;
     }
 
-    fn handle_input(&mut self, ctx: &Context, app: &mut AppContext) {
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
-            app.generator.stop();
-            self.reset_prompt(ctx, "".to_string());
+    fn handle_input(&mut self, app: &mut AppContext) {
+        if app
+            .egui_ctx
+            .input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+        {
+            app.controller.stop();
+            self.reset_prompt(&app.egui_ctx, "".to_string());
             self.history.reset(&self.prompt);
         }
 
         // Manage history
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
+        if app
+            .egui_ctx
+            .input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp))
+        {
             if let Some(prompt) = self.history.up(&app.state.history) {
-                self.reset_prompt(ctx, prompt);
+                self.reset_prompt(&app.egui_ctx, prompt);
             }
         }
 
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
+        if app
+            .egui_ctx
+            .input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown))
+        {
             if let Some(prompt) = self.history.down(&app.state.history) {
-                self.reset_prompt(ctx, prompt);
+                self.reset_prompt(&app.egui_ctx, prompt);
             }
         }
     }
@@ -206,9 +239,5 @@ impl Panel for PromptPanel {
             Message::Error(s) => self.error = Some(s),
             _ => {}
         }
-    }
-
-    fn next_panel(&mut self) -> Option<Box<dyn Panel>> {
-        None
     }
 }

@@ -1,4 +1,10 @@
-use super::*;
+use eframe::egui::*;
+
+use crate::{
+    controller::Message,
+    gui::{gauge::Gauge, prompt_panel::PromptPanel, AppContext, Panel},
+    models::ModelId,
+};
 
 const TEXT_FONT: FontId = FontId::new(20.0, FontFamily::Monospace);
 const PROGRESS_FONT: FontId = FontId::new(28.0, FontFamily::Monospace);
@@ -7,35 +13,48 @@ const PROGRESS_FONT: FontId = FontId::new(28.0, FontFamily::Monospace);
 pub struct LoadPanel {
     load_pct: f32,
     connecting: bool,
-    model_name: String,
+    download_msg: String,
     error: Option<String>,
     complete: bool,
     frame_counter: usize,
+    model_name: String,
+    model_id: ModelId,
 }
 
 impl LoadPanel {
-    pub fn new() -> Self {
+    pub fn new(model_id: ModelId, ctx: &mut AppContext) -> Self {
+        ctx.controller.load_model(model_id);
+
         Self {
             load_pct: 0.0,
             connecting: false,
-            model_name: Default::default(),
+            download_msg: Default::default(),
             error: None,
             complete: false,
             frame_counter: 0,
+            model_name: model_id.spec().name.to_string(),
+            model_id,
         }
     }
 }
 
 impl Panel for LoadPanel {
-    fn update(&mut self, ctx: &Context, app: &mut AppContext) {
+    fn update(&mut self, ctx: &mut AppContext) {
         const INFO_COLOR: Color32 = Color32::from_rgb(20, 140, 255);
+
+        ctx.egui_ctx
+            .send_viewport_cmd(ViewportCommand::Title(format!(
+                "{} ({})",
+                self.model_id.spec().name,
+                ctx.controller.model_config().description(),
+            )));
 
         self.frame_counter += 1;
 
-        CentralPanel::default().show(ctx, |ui| {
+        CentralPanel::default().show(&ctx.egui_ctx, |ui| {
             ui.vertical_centered(|ui| {
-                ui.label(RichText::new("Loading Model").font(TEXT_FONT));
                 ui.label(RichText::new(&self.model_name).font(TEXT_FONT));
+                ui.label(RichText::new(&self.download_msg).font(TEXT_FONT));
 
                 ui.add_space(ui.spacing().item_spacing.y * 2.5);
 
@@ -58,11 +77,7 @@ impl Panel for LoadPanel {
                     });
                 } else {
                     let width = ui.available_width() * 0.9;
-                    ui.add(
-                        gauge::Gauge::new(self.load_pct)
-                            .color(INFO_COLOR)
-                            .width(width),
-                    );
+                    ui.add(Gauge::new(self.load_pct).color(INFO_COLOR).width(width));
                 }
 
                 if let Some(error) = &self.error {
@@ -88,7 +103,7 @@ impl Panel for LoadPanel {
                     .rounding(4.0);
 
                     if ui.add(button).clicked() {
-                        app.generator.reload_weights();
+                        ctx.controller.reload_weights(self.model_id);
                         self.error = None;
                     }
                 }
@@ -96,25 +111,23 @@ impl Panel for LoadPanel {
         });
     }
 
-    fn handle_input(&mut self, _ctx: &Context, _app: &mut AppContext) {}
-
-    fn handle_message(&mut self, _app: &mut AppContext, msg: Message) {
+    fn handle_message(&mut self, _ctx: &mut AppContext, msg: Message) {
         match msg {
-            Message::WeightsDownloadBegin(s) => self.model_name = s,
-            Message::WeightsDownloadConnecting => self.connecting = true,
-            Message::WeightsDownloadProgress(pct) => {
+            Message::DownloadBegin(s) => self.download_msg = s,
+            Message::DownloadConnecting => self.connecting = true,
+            Message::DownloadProgress(pct) => {
                 self.connecting = false;
                 self.load_pct = pct;
             }
-            Message::WeightsDownloadComplete => self.complete = true,
+            Message::DownloadComplete => self.complete = true,
             Message::Error(s) => self.error = Some(s),
             _ => {}
         }
     }
 
-    fn next_panel(&mut self) -> Option<Box<dyn Panel>> {
+    fn next_panel(&mut self, _ctx: &mut AppContext) -> Option<Box<dyn Panel>> {
         if self.complete {
-            Some(Box::new(prompt_panel::PromptPanel::new()))
+            Some(Box::new(PromptPanel::new(self.model_id)))
         } else {
             None
         }
