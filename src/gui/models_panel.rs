@@ -102,7 +102,7 @@ impl ModelData {
         let font_id = FontId::new(18.0, FontFamily::Monospace);
 
         job.append(
-            &format!("Size: {}G", self.spec.size / (1 << 20)),
+            &format!("Size: {}M", self.spec.size / (1 << 20)),
             PADDING,
             TextFormat {
                 font_id: font_id.clone(),
