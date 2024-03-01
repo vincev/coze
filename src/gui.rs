@@ -144,6 +144,7 @@ impl eframe::App for App {
                 if !self.active_panel.is_start_panel() {
                     let arrow = RichText::new("⬅").font(FontId::new(24.0, FontFamily::Monospace));
                     if ui.add(Button::new(arrow).frame(false)).clicked() {
+                        self.ctx.controller.stop();
                         self.active_panel = Box::new(models_panel::ModelsPanel::new());
                     }
                 }

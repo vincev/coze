@@ -39,7 +39,7 @@ impl ModelId {
             },
             ModelId::Mistral7bInstructV02 => ModelSpec {
                 model_id: *self,
-                name: "Mistral Instruct 7B (v0.2)",
+                name: "Mistral Instruct 7B v0.2",
                 size: 4140374304,
                 cache_dir: "mistral_instruct_7b_v02",
                 model_repo: "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",

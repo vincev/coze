@@ -7,6 +7,7 @@ use crate::{
         history::HistoryNavigator,
         AppContext, Panel, Prompt,
     },
+    models::ModelId,
 };
 
 const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
@@ -21,10 +22,11 @@ pub struct PromptPanel {
     history: HistoryNavigator,
     frame_counter: usize,
     scroll_to_bottom: bool,
+    model_id: ModelId,
 }
 
 impl PromptPanel {
-    pub fn new() -> Self {
+    pub fn new(model_id: ModelId) -> Self {
         Self {
             prompt_field_id: Id::new("prompt-id"),
             last_prompt_id: PromptId::default(),
@@ -33,6 +35,7 @@ impl PromptPanel {
             history: HistoryNavigator::new(),
             frame_counter: 0,
             scroll_to_bottom: false,
+            model_id,
         }
     }
 
@@ -83,6 +86,13 @@ impl PromptPanel {
 
 impl Panel for PromptPanel {
     fn update(&mut self, ctx: &mut AppContext) {
+        ctx.egui_ctx
+            .send_viewport_cmd(ViewportCommand::Title(format!(
+                "{} ({})",
+                self.model_id.spec().name,
+                ctx.controller.model_config().description(),
+            )));
+
         self.frame_counter += 1;
 
         let egui_ctx = ctx.egui_ctx.clone();

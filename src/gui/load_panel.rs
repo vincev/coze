@@ -42,6 +42,13 @@ impl Panel for LoadPanel {
     fn update(&mut self, ctx: &mut AppContext) {
         const INFO_COLOR: Color32 = Color32::from_rgb(20, 140, 255);
 
+        ctx.egui_ctx
+            .send_viewport_cmd(ViewportCommand::Title(format!(
+                "{} ({})",
+                self.model_id.spec().name,
+                ctx.controller.model_config().description(),
+            )));
+
         self.frame_counter += 1;
 
         CentralPanel::default().show(&ctx.egui_ctx, |ui| {
@@ -120,7 +127,7 @@ impl Panel for LoadPanel {
 
     fn next_panel(&mut self, _ctx: &mut AppContext) -> Option<Box<dyn Panel>> {
         if self.complete {
-            Some(Box::new(PromptPanel::new()))
+            Some(Box::new(PromptPanel::new(self.model_id)))
         } else {
             None
         }
