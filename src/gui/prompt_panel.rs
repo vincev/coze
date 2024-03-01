@@ -130,7 +130,8 @@ impl Panel for PromptPanel {
                 .auto_shrink(false)
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    for prompt in &ctx.state.history {
+                    let mut iter = ctx.state.history.iter().peekable();
+                    while let Some(prompt) = iter.next() {
                         let r = ui.add(Bubble::new(
                             &prompt.prompt,
                             BubbleContent::Prompt,
@@ -159,12 +160,15 @@ impl Panel for PromptPanel {
 
                             ui.add_space(ui.spacing().item_spacing.y * 2.5);
                         } else {
-                            let dots = ["⏺   ", " ⏺  ", "  ⏺ ", "   ⏺", "  ⏺ ", " ⏺  "];
-                            ui.add(Bubble::new(
-                                dots[(self.frame_counter / 18) % dots.len()],
-                                BubbleContent::Reply,
-                                ctx.state.ui_mode,
-                            ));
+                            // Show waiting animation for last entry.
+                            if iter.peek().is_none() {
+                                let dots = ["⏺   ", " ⏺  ", "  ⏺ ", "   ⏺", "  ⏺ ", " ⏺  "];
+                                ui.add(Bubble::new(
+                                    dots[(self.frame_counter / 18) % dots.len()],
+                                    BubbleContent::Reply,
+                                    ctx.state.ui_mode,
+                                ));
+                            }
                             ui.add_space(ui.spacing().item_spacing.y * 2.5);
                         }
                     }
