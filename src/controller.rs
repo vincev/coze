@@ -2,7 +2,7 @@ use anyhow::Result;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::thread;
 
-use crate::models::{Model, ModelConfig, ModelId, ModelParams, ModelsCache};
+use crate::models::{Generator, ModelConfig, ModelId, ModelParams, ModelsCache};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PromptId(u32);
@@ -134,7 +134,7 @@ fn message_loop(
     command_rx: Receiver<Command>,
     message_tx: Sender<Message>,
 ) {
-    let mut model: Option<Box<dyn Model>> = None;
+    let mut generator: Option<Box<dyn Generator>> = None;
     let mut model_params = model_config.params();
 
     while let Ok(cmd) = command_rx.recv() {
@@ -147,14 +147,14 @@ fn message_loop(
                     &message_tx,
                     false,
                 ) {
-                    Ok(m) => model = Some(m),
+                    Ok(m) => generator = Some(m),
                     Err(e) => {
                         let _ = message_tx.send(Message::Error(e.to_string()));
                     }
                 };
             }
             Command::Prompt(prompt_id, prompt) => {
-                if let Some(model) = model.as_mut() {
+                if let Some(model) = generator.as_mut() {
                     if let Err(e) = model.prompt(&prompt, &model_params) {
                         let _ = message_tx.send(Message::Error(e.to_string()));
                     } else {
@@ -188,7 +188,7 @@ fn message_loop(
                     &message_tx,
                     true,
                 ) {
-                    Ok(m) => model = Some(m),
+                    Ok(m) => generator = Some(m),
                     Err(e) => {
                         let _ = message_tx.send(Message::Error(e.to_string()));
                     }
@@ -205,7 +205,7 @@ fn load_model(
     command_rx: &Receiver<Command>,
     message_tx: &Sender<Message>,
     reload: bool,
-) -> Result<Box<dyn Model>> {
+) -> Result<Box<dyn Generator>> {
     let cache = ModelsCache::new()?;
     let cached_model = cache.cached_model(model_id);
 

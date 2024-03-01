@@ -1,8 +1,8 @@
-// The following model is a copy from:
+// This is a copy of:
 //
 // https://github.com/huggingface/candle/blob/main/candle-transformers/src/models/quantized_stable_lm.rs
 //
-// with some changes to rerun the same model instance on a new prompt.
+// with some changes to rerun the same model instance on a new prompt (clear_kv_cache).
 use candle::{DType, Device, Module, Result, Tensor, D};
 use candle_nn::{Activation, LayerNorm};
 use candle_transformers::{

@@ -8,11 +8,13 @@ use strum::{EnumIter, IntoEnumIterator};
 
 pub use cache::ModelsCache;
 pub use config::{ModelConfig, ModelParams};
-use qstablelm::QStableLM;
 
 mod cache;
 mod config;
+mod qmistral;
 mod qstablelm;
+mod qzephyr;
+mod transformers;
 
 #[derive(Debug, Clone, Copy, EnumIter)]
 pub enum ModelId {
@@ -64,11 +66,11 @@ impl ModelId {
     }
 
     /// Create a model instance.
-    pub fn model(&self, params: ModelParams) -> Result<Box<dyn Model>> {
+    pub fn model(&self, params: ModelParams) -> Result<Box<dyn Generator>> {
         match self {
-            ModelId::StableLm2Zephyr => Ok(Box::new(QStableLM::new(params)?)),
-            ModelId::Mistral7bInstructV02 => todo!(),
-            ModelId::Zephyr7bBeta => todo!(),
+            ModelId::StableLm2Zephyr => Ok(Box::new(qstablelm::Model::new(params)?)),
+            ModelId::Zephyr7bBeta => Ok(Box::new(qzephyr::Model::new(params)?)),
+            ModelId::Mistral7bInstructV02 => Ok(Box::new(qmistral::Model::new(params)?)),
         }
     }
 }
@@ -95,7 +97,7 @@ pub struct ModelSpec {
 }
 
 /// Interface to an inference model.
-pub trait Model {
+pub trait Generator {
     /// Initialize the model with a prompt.
     fn prompt(&mut self, prompt: &str, params: &ModelParams) -> Result<()>;
 
