@@ -1,8 +1,7 @@
 # An egui app for prompting a local offline LLM.
 
 <p align="center">
-  <img alt="Model loading" src="media/loading.gif" height="300">
-  <img alt="Example prompt" src="media/prompt.gif" height="300">
+  <img alt="Example prompt" src="media/prompt.gif" height="450">
 </p>
 
 ## Description
@@ -11,9 +10,11 @@
 a local offline LLM using the Huggingface [`candle`](https://github.com/huggingface/candle)
 crate.
 
-Currently it uses a [quantized version](https://huggingface.co/vincevas/coze-stablelm-2-1_6b)
-of the [StableLM 2 Zephyr 1.6B](https://huggingface.co/stabilityai/stablelm-2-zephyr-1_6b)
-model that is a relatively small model that is fun to use.
+Currently it supports the following quantized models:
+
+- [StableLM 2 Zephyr 1.6B](https://huggingface.co/stabilityai/stablelm-2-zephyr-1_6b)
+- [Mistral Instruct 7B v0.2](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2)
+- [Hugging FaceZephyr 7B β](https://huggingface.co/HuggingFaceH4/zephyr-7b-beta)
 
 The current version supports:
 
