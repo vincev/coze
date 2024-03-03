@@ -1,6 +1,6 @@
 //! Models configuration and loading.
 use anyhow::Result;
-use candle::Tensor;
+use candle::{DType, Tensor};
 use rand::prelude::*;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -99,16 +99,69 @@ pub struct ModelSpec {
 /// Interface to an inference model.
 pub trait Generator {
     /// Initialize the model with a prompt.
-    fn prompt(&mut self, prompt: &str, params: &ModelParams) -> Result<()>;
+    fn prompt(&mut self, prompt: &str, params: &ModelParams) -> Result<TokensStream>;
 
-    /// Get the next token.
-    ///
-    /// Returns Ok(None) when tokens generation is complete.
-    fn next(&mut self) -> Result<Option<String>>;
+    /// Runs the forward step for the given tokens.
+    fn forward(&mut self, tokens: &[u32], pos: usize) -> Result<u32>;
+
+    /// Decode the given tokens.
+    fn decode(&mut self, tokens: &[u32]) -> Result<String>;
 }
 
-/// Sample a token from the given logits tensor.
-pub fn sample_token(logits: &Tensor, params: &ModelParams) -> Result<u32> {
+/// Generates tokens for a generator.
+#[derive(Debug)]
+pub struct TokensStream {
+    eos_token: u32,
+    prompt_tokens_len: usize,
+    tokens: Vec<u32>,
+    consumed: bool,
+}
+
+impl TokensStream {
+    /// Creates a new stream.
+    pub fn new(eos_token: u32, prompt_tokens_len: usize) -> Self {
+        Self {
+            eos_token,
+            prompt_tokens_len,
+            tokens: vec![0],
+            consumed: false,
+        }
+    }
+
+    /// Generates the next token.
+    pub fn next(&mut self, generator: &mut dyn Generator) -> Result<Option<String>> {
+        if self.consumed {
+            Ok(None)
+        } else {
+            let decode_idx = self.tokens.len().saturating_sub(5);
+            let prev_text = generator.decode(&self.tokens[decode_idx..])?;
+            loop {
+                let token = self.next_token(generator)?;
+                if token == self.eos_token {
+                    self.consumed = true;
+                    return Ok(None);
+                }
+
+                self.tokens.push(token);
+                let text = generator.decode(&self.tokens[decode_idx..])?;
+                if text.len() > prev_text.len() {
+                    return Ok(Some(text.trim_start_matches(&prev_text).to_string()));
+                }
+            }
+        }
+    }
+
+    fn next_token(&mut self, generator: &mut dyn Generator) -> Result<u32> {
+        let last_idx = self.tokens.len().saturating_sub(1);
+        generator.forward(
+            &self.tokens[last_idx..],
+            self.prompt_tokens_len + self.tokens.len(),
+        )
+    }
+}
+
+/// Sample a token from the given logits tensor and tokens history.
+pub fn sample_token(logits: Tensor, tokens: &[u32], params: &ModelParams) -> Result<u32> {
     #[derive(PartialEq, Debug)]
     struct HeapVal(f32);
 
@@ -125,6 +178,18 @@ pub fn sample_token(logits: &Tensor, params: &ModelParams) -> Result<u32> {
             other.0.partial_cmp(&self.0).unwrap_or(Ordering::Greater)
         }
     }
+
+    let logits = logits.squeeze(0)?.squeeze(0)?.to_dtype(DType::F32)?;
+    let logits = if params.repeat_penalty == 1. {
+        logits
+    } else {
+        let start_at = tokens.len().saturating_sub(params.repeat_last_n);
+        candle_transformers::utils::apply_repeat_penalty(
+            &logits,
+            params.repeat_penalty,
+            &tokens[start_at..],
+        )?
+    };
 
     let logits_v: Vec<f32> = logits.to_vec1()?;
 

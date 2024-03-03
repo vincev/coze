@@ -154,26 +154,30 @@ fn message_loop(
                 };
             }
             Command::Prompt(prompt_id, prompt) => {
-                if let Some(model) = generator.as_mut() {
-                    if let Err(e) = model.prompt(&prompt, &model_params) {
-                        let _ = message_tx.send(Message::Error(e.to_string()));
-                    } else {
-                        loop {
-                            match model.next() {
-                                Ok(Some(token_str)) => {
-                                    let _ = message_tx.send(Message::Token(prompt_id, token_str));
-                                }
-                                Ok(None) => break,
-                                Err(e) => {
-                                    let _ = message_tx.send(Message::Error(e.to_string()));
-                                    break;
-                                }
-                            }
+                if let Some(generator) = generator.as_mut() {
+                    let mut token_stream = match generator.prompt(&prompt, &model_params) {
+                        Ok(ts) => ts,
+                        Err(e) => {
+                            let _ = message_tx.send(Message::Error(e.to_string()));
+                            continue;
+                        }
+                    };
 
-                            // Skip remainining tokens if there is a new command.
-                            if !command_rx.is_empty() {
+                    loop {
+                        match token_stream.next(generator.as_mut()) {
+                            Ok(Some(token_str)) => {
+                                let _ = message_tx.send(Message::Token(prompt_id, token_str));
+                            }
+                            Ok(None) => break,
+                            Err(e) => {
+                                let _ = message_tx.send(Message::Error(e.to_string()));
                                 break;
                             }
+                        }
+
+                        // Skip remainining tokens if there is a new command.
+                        if !command_rx.is_empty() {
+                            break;
                         }
                     }
                 }

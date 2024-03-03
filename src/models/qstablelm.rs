@@ -1,9 +1,10 @@
 use anyhow::Result;
-use candle::{DType, Device, Tensor};
+use candle::{Device, Tensor};
 use candle_transformers::quantized_var_builder::VarBuilder;
 
 use crate::models::{
     sample_token, transformers::quantized_stable_lm, Generator, ModelId, ModelParams, ModelsCache,
+    TokensStream,
 };
 
 mod arcade100k;
@@ -13,10 +14,6 @@ pub struct Model {
     model: quantized_stable_lm::Transformer,
     params: ModelParams,
     tokenizer: arcade100k::Arcade100k,
-    tokens: Vec<u32>,
-    consumed: bool,
-    begin_prompt: bool,
-    decoded_index: usize,
     eos_token: u32,
 }
 
@@ -35,69 +32,30 @@ impl Model {
             model,
             params,
             tokenizer,
-            tokens: Default::default(),
-            consumed: false,
-            begin_prompt: true,
-            decoded_index: 0,
             eos_token,
         })
-    }
-
-    fn next_token(&mut self) -> Result<bool> {
-        let start_pos = if self.begin_prompt {
-            self.begin_prompt = false;
-            0
-        } else {
-            self.tokens.len().saturating_sub(1)
-        };
-
-        let input = Tensor::new(&self.tokens[start_pos..], &Device::Cpu)?.unsqueeze(0)?;
-        let logits = self.model.forward(&input, start_pos)?;
-        let logits = logits.squeeze(0)?.squeeze(0)?.to_dtype(DType::F32)?;
-        let logits = if self.params.repeat_penalty == 1. {
-            logits
-        } else {
-            let start_at = self.tokens.len().saturating_sub(self.params.repeat_last_n);
-            candle_transformers::utils::apply_repeat_penalty(
-                &logits,
-                self.params.repeat_penalty,
-                &self.tokens[start_at..],
-            )?
-        };
-
-        let next_token = sample_token(&logits, &self.params)?;
-        if next_token == self.eos_token {
-            self.consumed = true;
-            Ok(false)
-        } else {
-            self.tokens.push(next_token);
-            Ok(true)
-        }
     }
 }
 
 impl Generator for Model {
-    fn prompt(&mut self, prompt: &str, params: &ModelParams) -> Result<()> {
+    fn prompt(&mut self, prompt: &str, params: &ModelParams) -> Result<TokensStream> {
         self.params = *params;
-        self.begin_prompt = true;
-        self.decoded_index = 0;
-        self.consumed = false;
         self.model.clear_kv_cache();
 
         let template = format!("<|user|>\n{prompt}<|endoftext|>\n<|assistant|>\n");
-        self.tokens = self.tokenizer.encode(&template);
-        self.decoded_index = self.tokens.len();
+        let tokens = self.tokenizer.encode(&template);
+        self.forward(&tokens, 0)?;
 
-        Ok(())
+        Ok(TokensStream::new(self.eos_token, tokens.len()))
     }
 
-    fn next(&mut self) -> Result<Option<String>> {
-        if !self.consumed && self.next_token()? {
-            let decoded = self.tokenizer.decode(&self.tokens[self.decoded_index..])?;
-            self.decoded_index = self.tokens.len();
-            Ok(Some(decoded))
-        } else {
-            Ok(None)
-        }
+    fn forward(&mut self, tokens: &[u32], pos: usize) -> Result<u32> {
+        let input = Tensor::new(tokens, &Device::Cpu)?.unsqueeze(0)?;
+        let logits = self.model.forward(&input, pos)?;
+        sample_token(logits, tokens, &self.params)
+    }
+
+    fn decode(&mut self, tokens: &[u32]) -> Result<String> {
+        self.tokenizer.decode(tokens)
     }
 }
