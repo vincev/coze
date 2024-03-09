@@ -1,6 +1,12 @@
 use anyhow::Result;
 use crossbeam_channel::{bounded, Receiver, Sender};
-use std::thread;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+};
 
 use crate::models::{Generator, ModelConfig, ModelId, ModelParams, ModelsCache};
 
@@ -249,6 +255,31 @@ fn load_model(
         })?;
     }
 
+    let _ = message_tx.send(Message::DownloadBegin("Loading Model".to_string()));
+    let finished = Arc::new(AtomicBool::new(false));
+    let task = thread::spawn({
+        let message_tx = message_tx.clone();
+        let finished = finished.clone();
+        move || {
+            for pct in 0..=1000 {
+                if finished.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                let _ = message_tx.send(Message::DownloadProgress((pct % 100) as f32 / 100.0));
+                thread::sleep(std::time::Duration::from_millis(25));
+            }
+
+            let _ = message_tx.send(Message::DownloadProgress(1.0));
+            thread::sleep(std::time::Duration::from_millis(100));
+        }
+    });
+
+    // Create model from the loaded weights.
+    let generator = model_id.model(params)?;
+    finished.store(true, Ordering::Relaxed);
+
+    let _ = task.join();
     let _ = message_tx.send(Message::DownloadComplete);
-    model_id.model(params)
+    Ok(generator)
 }
