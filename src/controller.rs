@@ -1,6 +1,12 @@
 use anyhow::Result;
 use crossbeam_channel::{bounded, Receiver, Sender};
-use std::thread;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+};
 
 use crate::models::{Generator, ModelConfig, ModelId, ModelParams, ModelsCache};
 
@@ -29,7 +35,7 @@ enum Command {
     Shutdown,
 }
 
-/// A message sent by the generator task
+/// A message sent by the controller task
 pub enum Message {
     /// A generated token.
     Token(PromptId, String),
@@ -45,10 +51,10 @@ pub enum Message {
     DownloadComplete,
 }
 
-/// Tokens generator.
+/// Models controller.
 ///
 /// Runs the model on another thread, processes incoming `Command` through a channel
-/// and sends back generated tokens to the UI.
+/// and sends back model related messages to the UI.
 #[derive(Debug)]
 pub struct Controller {
     command_tx: Sender<Command>,
@@ -59,7 +65,7 @@ pub struct Controller {
 }
 
 impl Controller {
-    /// Creates a new generator with the given configuration.
+    /// Creates a new controller with the given configuration.
     pub fn new(model_config: ModelConfig) -> Self {
         let (command_tx, command_rx) = bounded(1024);
         let (message_tx, message_rx) = bounded(1024);
@@ -77,7 +83,7 @@ impl Controller {
         }
     }
 
-    /// Sends a new prompt to the mode.
+    /// Sends a new prompt to the model.
     pub fn send_prompt(&mut self, prompt: &str) -> PromptId {
         self.last_prompt_id = self.last_prompt_id.inc();
 
@@ -88,7 +94,7 @@ impl Controller {
         self.last_prompt_id
     }
 
-    /// Refreshes weights
+    /// Reloads weights.
     pub fn reload_weights(&self, model_id: ModelId) {
         let _ = self.command_tx.send(Command::ReloadWeights(model_id));
     }
@@ -103,18 +109,18 @@ impl Controller {
         self.model_config
     }
 
-    /// Sets the generator config
+    /// Sets the model configuration.
     pub fn set_config(&mut self, config: ModelConfig) {
         self.model_config = config;
         let _ = self.command_tx.send(Command::Config(config));
     }
 
-    /// Get the next available generator message.
+    /// Get the next available controller message.
     pub fn next_message(&self) -> Option<Message> {
         self.message_rx.try_recv().ok()
     }
 
-    /// Stops token generation.
+    /// Stops tokens generation.
     ///
     /// This may be useful when the generator is in deranged mode and it keeps
     /// generating text we are not interested in.
@@ -122,7 +128,7 @@ impl Controller {
         let _ = self.command_tx.send(Command::Stop);
     }
 
-    /// Shutdown generator thread
+    /// Shutdown controller task.
     pub fn shutdown(&mut self) {
         let _ = self.command_tx.send(Command::Shutdown);
         self.task.take().map(|h| h.join());
@@ -249,6 +255,31 @@ fn load_model(
         })?;
     }
 
+    let _ = message_tx.send(Message::DownloadBegin("Loading Model".to_string()));
+    let finished = Arc::new(AtomicBool::new(false));
+    let task = thread::spawn({
+        let message_tx = message_tx.clone();
+        let finished = finished.clone();
+        move || {
+            for pct in 0..=1000 {
+                if finished.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                let _ = message_tx.send(Message::DownloadProgress((pct % 100) as f32 / 100.0));
+                thread::sleep(std::time::Duration::from_millis(25));
+            }
+
+            let _ = message_tx.send(Message::DownloadProgress(1.0));
+            thread::sleep(std::time::Duration::from_millis(100));
+        }
+    });
+
+    // Create model from the loaded weights.
+    let generator = model_id.model(params)?;
+    finished.store(true, Ordering::Relaxed);
+
+    let _ = task.join();
     let _ = message_tx.send(Message::DownloadComplete);
-    model_id.model(params)
+    Ok(generator)
 }
