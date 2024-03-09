@@ -3,6 +3,7 @@ use eframe::egui::*;
 use super::UiMode;
 
 const TEXT_FONT: FontId = FontId::new(15.0, FontFamily::Monospace);
+const FOOTER_FONT: FontId = FontId::new(10.0, FontFamily::Monospace);
 const ROUNDING: f32 = 8.0;
 
 pub enum BubbleContent {
@@ -14,6 +15,7 @@ pub struct Bubble {
     text: WidgetText,
     content: BubbleContent,
     ui_mode: UiMode,
+    footer: Option<WidgetText>,
 }
 
 impl Bubble {
@@ -23,6 +25,15 @@ impl Bubble {
             text,
             content,
             ui_mode,
+            footer: None,
+        }
+    }
+
+    pub fn with_footer(self, footer: &str) -> Self {
+        let footer = WidgetText::from(RichText::new(footer).font(FOOTER_FONT).monospace());
+        Self {
+            footer: Some(footer),
+            ..self
         }
     }
 
@@ -53,11 +64,23 @@ impl Widget for Bubble {
             text,
             content,
             ui_mode,
+            footer,
         } = self;
 
         let text_wrap_width = ui.available_width() * WIDTH_PCT - 2.0 * PADDING;
-        let galley = text.into_galley(ui, Some(true), text_wrap_width, TextStyle::Monospace);
-        let bubble_size = galley.size() + Vec2::splat(2.0 * PADDING);
+
+        let footer_padding = if footer.is_some() { PADDING / 2.0 } else { 0.0 };
+        let footer_galley =
+            footer.map(|f| f.into_galley(ui, None, text_wrap_width, TextStyle::Monospace));
+        let footer_size = footer_galley.as_ref().map(|g| g.size()).unwrap_or_default();
+
+        let text_galley = text.into_galley(ui, Some(true), text_wrap_width, TextStyle::Monospace);
+        let text_size = text_galley.size();
+
+        let bubble_size = Vec2::new(
+            text_size.x.max(footer_size.x) + 2.0 * PADDING,
+            text_size.y + footer_size.y + footer_padding + 2.0 * PADDING,
+        );
 
         let desired_size = Vec2::new(ui.available_width(), bubble_size.y);
         let (rect, response) = ui.allocate_at_least(desired_size, Sense::click());
@@ -97,12 +120,23 @@ impl Widget for Bubble {
             let text_pos = ui
                 .layout()
                 .align_size_within_rect(
-                    galley.size(),
-                    paint_rect.shrink2(Vec2::splat(PADDING + expand)),
+                    text_size,
+                    paint_rect
+                        .shrink2(Vec2::splat(PADDING + expand))
+                        .translate(Vec2::new(0.0, -footer_size.y)),
                 )
                 .min;
 
-            ui.painter().galley(text_pos, galley, text_color);
+            ui.painter()
+                .galley(text_pos, text_galley.clone(), text_color);
+
+            if let Some(footer_galley) = footer_galley {
+                let text_pos = Pos2::new(
+                    paint_rect.right() - PADDING - footer_size.x - expand,
+                    paint_rect.bottom() - footer_padding - footer_size.y - expand,
+                );
+                ui.painter().galley(text_pos, footer_galley, text_color);
+            }
         }
 
         response

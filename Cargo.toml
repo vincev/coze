@@ -5,14 +5,15 @@ edition = "2021"
 license = "Apache-2.0"
 name = "coze"
 repository = "https://github.com/vincev/coze"
-version = "0.1.4"
+version = "0.1.5"
 
 [dependencies]
 anyhow = "1.0.79"
-base64 = "0.21.7"
+base64 = "0.22"
 candle = { version = "0.4", default-features = false, package = "candle-core" }
 candle-nn = { version = "0.4", default-features = false }
 candle-transformers = { version = "0.4", default-features = false }
+chrono = { version = "0.4.35", features = ["clock", "serde", "std"], default-features = false }
 crossbeam-channel = "0.5.11"
 dirs = "5.0.1"
 fancy-regex = "0.13.0"

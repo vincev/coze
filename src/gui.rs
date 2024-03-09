@@ -1,7 +1,6 @@
-use std::fmt::Debug;
-
 use eframe::egui::*;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 
 use crate::{
     controller::{Controller, Message},
@@ -59,6 +58,7 @@ struct PersistedState {
 struct Prompt {
     prompt: String,
     reply: String,
+    info: String,
 }
 
 trait Panel: Debug {

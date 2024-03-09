@@ -1,3 +1,4 @@
+use chrono::prelude::*;
 use eframe::egui::*;
 
 use crate::{
@@ -22,7 +23,7 @@ pub struct PromptPanel {
     history: HistoryNavigator,
     frame_counter: usize,
     scroll_to_bottom: bool,
-    model_id: ModelId,
+    model_name: String,
 }
 
 impl PromptPanel {
@@ -35,7 +36,7 @@ impl PromptPanel {
             history: HistoryNavigator::new(),
             frame_counter: 0,
             scroll_to_bottom: false,
-            model_id,
+            model_name: model_id.spec().name.to_string(),
         }
     }
 
@@ -46,9 +47,12 @@ impl PromptPanel {
             while ctx.controller.next_message().is_some() {}
 
             self.last_prompt_id = ctx.controller.send_prompt(prompt);
+
+            let info = format!("{} - {}", self.model_name, Local::now().format("%F %T%.3f"));
             ctx.state.history.push(Prompt {
                 prompt: prompt.to_owned(),
                 reply: Default::default(),
+                info,
             });
         }
 
@@ -89,7 +93,7 @@ impl Panel for PromptPanel {
         ctx.egui_ctx
             .send_viewport_cmd(ViewportCommand::Title(format!(
                 "{} ({})",
-                self.model_id.spec().name,
+                &self.model_name,
                 ctx.controller.model_config().description(),
             )));
 
@@ -142,11 +146,10 @@ impl Panel for PromptPanel {
                 .show(ui, |ui| {
                     let mut iter = ctx.state.history.iter().peekable();
                     while let Some(prompt) = iter.next() {
-                        let r = ui.add(Bubble::new(
-                            &prompt.prompt,
-                            BubbleContent::Prompt,
-                            ctx.state.ui_mode,
-                        ));
+                        let r = ui.add(
+                            Bubble::new(&prompt.prompt, BubbleContent::Prompt, ctx.state.ui_mode)
+                                .with_footer(&prompt.info),
+                        );
                         if r.clicked() {
                             ui.ctx().copy_text(prompt.prompt.clone());
                         }
