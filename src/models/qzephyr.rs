@@ -2,19 +2,19 @@ use anyhow::Result;
 use candle::{quantized::gguf_file, Device, Tensor};
 
 use crate::models::{
-    sample_token, transformers::quantized_llama, Generator, ModelId, ModelParams, ModelsCache,
+    sample_token, transformers::quantized_llama, Model, ModelId, ModelParams, ModelsCache,
     TokensStream,
 };
 
-/// Quantized StableLM model.
-pub struct Model {
+/// Quantized Zephyr model.
+pub struct QuantizedZephyr {
     model: quantized_llama::Transformer,
     params: ModelParams,
     tokenizer: tokenizers::Tokenizer,
     eos_token: u32,
 }
 
-impl Model {
+impl QuantizedZephyr {
     pub fn new(params: ModelParams) -> Result<Self> {
         let cache = ModelsCache::new()?;
         let cached_model = cache.cached_model(ModelId::Zephyr7bBeta);
@@ -40,7 +40,7 @@ impl Model {
     }
 }
 
-impl Generator for Model {
+impl Model for QuantizedZephyr {
     fn prompt(&mut self, prompt: &str, params: &ModelParams) -> Result<TokensStream> {
         self.params = *params;
         self.model.clear_kv_cache();
