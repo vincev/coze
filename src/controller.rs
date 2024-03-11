@@ -269,17 +269,22 @@ fn load_model(
                 let _ = message_tx.send(Message::DownloadProgress((pct % 100) as f32 / 100.0));
                 thread::sleep(std::time::Duration::from_millis(25));
             }
-
-            let _ = message_tx.send(Message::DownloadProgress(1.0));
-            thread::sleep(std::time::Duration::from_millis(100));
         }
     });
 
     // Create model from the loaded weights.
-    let model = model_id.model(params)?;
-    finished.store(true, Ordering::Relaxed);
+    let model_result = model_id.model(params);
 
+    // Stop loading thread before checking for error.
+    finished.store(true, Ordering::Relaxed);
     let _ = task.join();
+    let model = model_result?;
+
+    // Show progress and download complete, use a small delay to make it easier to
+    // see in the UI.
+    let _ = message_tx.send(Message::DownloadProgress(1.0));
+    thread::sleep(std::time::Duration::from_millis(150));
     let _ = message_tx.send(Message::DownloadComplete);
+
     Ok(model)
 }
