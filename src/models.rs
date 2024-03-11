@@ -66,11 +66,11 @@ impl ModelId {
     }
 
     /// Create a model instance.
-    pub fn model(&self, params: ModelParams) -> Result<Box<dyn Generator>> {
+    pub fn model(&self, params: ModelParams) -> Result<Box<dyn Model>> {
         match self {
-            ModelId::StableLm2Zephyr => Ok(Box::new(qstablelm::Model::new(params)?)),
-            ModelId::Zephyr7bBeta => Ok(Box::new(qzephyr::Model::new(params)?)),
-            ModelId::Mistral7bInstructV02 => Ok(Box::new(qmistral::Model::new(params)?)),
+            ModelId::StableLm2Zephyr => Ok(Box::new(qstablelm::QuantizedStableLM::new(params)?)),
+            ModelId::Zephyr7bBeta => Ok(Box::new(qzephyr::QuantizedZephyr::new(params)?)),
+            ModelId::Mistral7bInstructV02 => Ok(Box::new(qmistral::QuantizedMistral::new(params)?)),
         }
     }
 }
@@ -97,7 +97,7 @@ pub struct ModelSpec {
 }
 
 /// Interface to an inference model.
-pub trait Generator {
+pub trait Model {
     /// Initialize the model with a prompt.
     fn prompt(&mut self, prompt: &str, params: &ModelParams) -> Result<TokensStream>;
 
@@ -108,7 +108,7 @@ pub trait Generator {
     fn decode(&mut self, tokens: &[u32]) -> Result<String>;
 }
 
-/// Generates tokens for a generator.
+/// Generates tokens for a model.
 #[derive(Debug)]
 pub struct TokensStream {
     eos_token: u32,
@@ -129,21 +129,21 @@ impl TokensStream {
     }
 
     /// Generates the next token.
-    pub fn next(&mut self, generator: &mut dyn Generator) -> Result<Option<String>> {
+    pub fn next(&mut self, model: &mut dyn Model) -> Result<Option<String>> {
         if self.consumed {
             Ok(None)
         } else {
             let decode_idx = self.tokens.len().saturating_sub(5);
-            let prev_text = generator.decode(&self.tokens[decode_idx..])?;
+            let prev_text = model.decode(&self.tokens[decode_idx..])?;
             loop {
-                let token = self.next_token(generator)?;
+                let token = self.next_token(model)?;
                 if token == self.eos_token {
                     self.consumed = true;
                     return Ok(None);
                 }
 
                 self.tokens.push(token);
-                let text = generator.decode(&self.tokens[decode_idx..])?;
+                let text = model.decode(&self.tokens[decode_idx..])?;
                 if text.len() > prev_text.len() {
                     return Ok(Some(text.trim_start_matches(&prev_text).to_string()));
                 }
@@ -151,9 +151,9 @@ impl TokensStream {
         }
     }
 
-    fn next_token(&mut self, generator: &mut dyn Generator) -> Result<u32> {
+    fn next_token(&mut self, model: &mut dyn Model) -> Result<u32> {
         let last_idx = self.tokens.len().saturating_sub(1);
-        generator.forward(
+        model.forward(
             &self.tokens[last_idx..],
             self.prompt_tokens_len + self.tokens.len(),
         )

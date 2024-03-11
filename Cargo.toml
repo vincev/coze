@@ -5,7 +5,7 @@ edition = "2021"
 license = "Apache-2.0"
 name = "coze"
 repository = "https://github.com/vincev/coze"
-version = "0.1.5"
+version = "0.1.6"
 
 [dependencies]
 anyhow = "1.0.79"

@@ -8,7 +8,7 @@ use std::{
     thread,
 };
 
-use crate::models::{Generator, ModelConfig, ModelId, ModelParams, ModelsCache};
+use crate::models::{Model, ModelConfig, ModelId, ModelParams, ModelsCache};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PromptId(u32);
@@ -31,7 +31,7 @@ enum Command {
     ReloadWeights(ModelId),
     /// Stops token generation.
     Stop,
-    /// Shutdown generator thread.
+    /// Shutdown controller thread.
     Shutdown,
 }
 
@@ -122,8 +122,8 @@ impl Controller {
 
     /// Stops tokens generation.
     ///
-    /// This may be useful when the generator is in deranged mode and it keeps
-    /// generating text we are not interested in.
+    /// This may be useful when the model is in deranged mode and it keeps generating
+    /// text we are not interested in.
     pub fn stop(&self) {
         let _ = self.command_tx.send(Command::Stop);
     }
@@ -140,7 +140,7 @@ fn message_loop(
     command_rx: Receiver<Command>,
     message_tx: Sender<Message>,
 ) {
-    let mut generator: Option<Box<dyn Generator>> = None;
+    let mut model: Option<Box<dyn Model>> = None;
     let mut model_params = model_config.params();
 
     while let Ok(cmd) = command_rx.recv() {
@@ -153,15 +153,15 @@ fn message_loop(
                     &message_tx,
                     false,
                 ) {
-                    Ok(m) => generator = Some(m),
+                    Ok(m) => model = Some(m),
                     Err(e) => {
                         let _ = message_tx.send(Message::Error(e.to_string()));
                     }
                 };
             }
             Command::Prompt(prompt_id, prompt) => {
-                if let Some(generator) = generator.as_mut() {
-                    let mut token_stream = match generator.prompt(&prompt, &model_params) {
+                if let Some(model) = model.as_mut() {
+                    let mut token_stream = match model.prompt(&prompt, &model_params) {
                         Ok(ts) => ts,
                         Err(e) => {
                             let _ = message_tx.send(Message::Error(e.to_string()));
@@ -170,7 +170,7 @@ fn message_loop(
                     };
 
                     loop {
-                        match token_stream.next(generator.as_mut()) {
+                        match token_stream.next(model.as_mut()) {
                             Ok(Some(token_str)) => {
                                 let _ = message_tx.send(Message::Token(prompt_id, token_str));
                             }
@@ -198,7 +198,7 @@ fn message_loop(
                     &message_tx,
                     true,
                 ) {
-                    Ok(m) => generator = Some(m),
+                    Ok(m) => model = Some(m),
                     Err(e) => {
                         let _ = message_tx.send(Message::Error(e.to_string()));
                     }
@@ -215,7 +215,7 @@ fn load_model(
     command_rx: &Receiver<Command>,
     message_tx: &Sender<Message>,
     reload: bool,
-) -> Result<Box<dyn Generator>> {
+) -> Result<Box<dyn Model>> {
     let cache = ModelsCache::new()?;
     let cached_model = cache.cached_model(model_id);
 
@@ -269,17 +269,22 @@ fn load_model(
                 let _ = message_tx.send(Message::DownloadProgress((pct % 100) as f32 / 100.0));
                 thread::sleep(std::time::Duration::from_millis(25));
             }
-
-            let _ = message_tx.send(Message::DownloadProgress(1.0));
-            thread::sleep(std::time::Duration::from_millis(100));
         }
     });
 
     // Create model from the loaded weights.
-    let generator = model_id.model(params)?;
-    finished.store(true, Ordering::Relaxed);
+    let model_result = model_id.model(params);
 
+    // Stop loading thread before checking for error.
+    finished.store(true, Ordering::Relaxed);
     let _ = task.join();
+    let model = model_result?;
+
+    // Show progress and download complete, use a small delay to make it easier to
+    // see in the UI.
+    let _ = message_tx.send(Message::DownloadProgress(1.0));
+    thread::sleep(std::time::Duration::from_millis(150));
     let _ = message_tx.send(Message::DownloadComplete);
-    Ok(generator)
+
+    Ok(model)
 }

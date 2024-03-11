@@ -3,21 +3,21 @@ use candle::{Device, Tensor};
 use candle_transformers::quantized_var_builder::VarBuilder;
 
 use crate::models::{
-    sample_token, transformers::quantized_stable_lm, Generator, ModelId, ModelParams, ModelsCache,
+    sample_token, transformers::quantized_stable_lm, Model, ModelId, ModelParams, ModelsCache,
     TokensStream,
 };
 
 mod arcade100k;
 
 /// Quantized StableLM model.
-pub struct Model {
+pub struct QuantizedStableLM {
     model: quantized_stable_lm::Transformer,
     params: ModelParams,
     tokenizer: arcade100k::Arcade100k,
     eos_token: u32,
 }
 
-impl Model {
+impl QuantizedStableLM {
     pub fn new(params: ModelParams) -> Result<Self> {
         let cache = ModelsCache::new()?;
         let cached_model = cache.cached_model(ModelId::StableLm2Zephyr);
@@ -37,7 +37,7 @@ impl Model {
     }
 }
 
-impl Generator for Model {
+impl Model for QuantizedStableLM {
     fn prompt(&mut self, prompt: &str, params: &ModelParams) -> Result<TokensStream> {
         self.params = *params;
         self.model.clear_kv_cache();
