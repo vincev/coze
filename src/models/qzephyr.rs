@@ -45,7 +45,7 @@ impl Model for QuantizedZephyr {
         self.params = *params;
         self.model.clear_kv_cache();
 
-        let template = format!("<|system|>\n</s>\n<|user|>\n{prompt}</s>\n<|assistant|>\n");
+        let template = format!("<|system|>\n</s>\n<|user|>\n{prompt}</s>\n<|assistant|> ");
         let tokens = self
             .tokenizer
             .encode(template, true)
