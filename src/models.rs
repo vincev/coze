@@ -54,8 +54,8 @@ impl ModelId {
                 cache_dir: "stablelm2_zephyr_1_6b",
                 model_repo: "vincevas/coze-stablelm-2-1_6b",
                 model_filename: "stablelm-2-zephyr-1_6b-Q4_1.gguf",
-                tokenizer_repo: "",
-                tokenizer_filename: "",
+                tokenizer_repo: "stabilityai/stablelm-2-zephyr-1_6b",
+                tokenizer_filename: "tokenizer.json",
             },
         }
     }

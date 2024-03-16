@@ -7,13 +7,11 @@ use crate::models::{
     TokensStream,
 };
 
-mod arcade100k;
-
 /// Quantized StableLM model.
 pub struct QuantizedStableLM {
     model: quantized_stable_lm::Transformer,
     params: ModelParams,
-    tokenizer: arcade100k::Arcade100k,
+    tokenizer: tokenizers::Tokenizer,
     eos_token: u32,
 }
 
@@ -25,8 +23,9 @@ impl QuantizedStableLM {
         let device = Device::Cpu;
         let vb = VarBuilder::from_gguf(cached_model.model_path, &device)?;
         let model = quantized_stable_lm::Transformer::new(vb)?;
-        let tokenizer = arcade100k::Arcade100k::new();
-        let eos_token = tokenizer.get_token("<|endoftext|>").unwrap();
+        let tokenizer = tokenizers::Tokenizer::from_file(cached_model.tokenizer_path)
+            .map_err(anyhow::Error::msg)?;
+        let eos_token = *tokenizer.get_vocab(true).get("<|endoftext|>").unwrap();
 
         Ok(Self {
             model,
@@ -42,8 +41,13 @@ impl Model for QuantizedStableLM {
         self.params = *params;
         self.model.clear_kv_cache();
 
-        let template = format!("<|user|>\n{prompt}<|endoftext|>\n<|assistant|>\n");
-        let tokens = self.tokenizer.encode(&template);
+        let template = format!("<|user|>\n{prompt}<|endoftext|>\n");
+        let tokens = self
+            .tokenizer
+            .encode(template, true)
+            .map_err(anyhow::Error::msg)?
+            .get_ids()
+            .to_vec();
         self.forward(&tokens, 0)?;
 
         Ok(TokensStream::new(self.eos_token, tokens.len()))
@@ -56,6 +60,8 @@ impl Model for QuantizedStableLM {
     }
 
     fn decode(&mut self, tokens: &[u32]) -> Result<String> {
-        self.tokenizer.decode(tokens)
+        self.tokenizer
+            .decode(tokens, false)
+            .map_err(anyhow::Error::msg)
     }
 }
