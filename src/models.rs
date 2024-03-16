@@ -18,25 +18,15 @@ mod transformers;
 
 #[derive(Debug, Clone, Copy, EnumIter)]
 pub enum ModelId {
-    StableLm2Zephyr,
     Mistral7bInstructV02,
     Zephyr7bBeta,
+    StableLm2Zephyr,
 }
 
 impl ModelId {
     /// Get the model specification.
     pub fn spec(&self) -> ModelSpec {
         match self {
-            ModelId::StableLm2Zephyr => ModelSpec {
-                model_id: *self,
-                name: "Stablelm 2 Zephyr 1.6B",
-                size: 1029022272,
-                cache_dir: "stablelm2_zephyr_1_6b",
-                model_repo: "vincevas/coze-stablelm-2-1_6b",
-                model_filename: "stablelm-2-zephyr-1_6b-Q4_1.gguf",
-                tokenizer_repo: "",
-                tokenizer_filename: "",
-            },
             ModelId::Mistral7bInstructV02 => ModelSpec {
                 model_id: *self,
                 name: "Mistral Instruct 7B v0.2",
@@ -56,6 +46,16 @@ impl ModelId {
                 model_filename: "zephyr-7b-beta.Q4_K_M.gguf",
                 tokenizer_repo: "mistralai/Mistral-7B-Instruct-v0.2",
                 tokenizer_filename: "tokenizer.json",
+            },
+            ModelId::StableLm2Zephyr => ModelSpec {
+                model_id: *self,
+                name: "Stablelm 2 Zephyr 1.6B",
+                size: 1029022272,
+                cache_dir: "stablelm2_zephyr_1_6b",
+                model_repo: "vincevas/coze-stablelm-2-1_6b",
+                model_filename: "stablelm-2-zephyr-1_6b-Q4_1.gguf",
+                tokenizer_repo: "",
+                tokenizer_filename: "",
             },
         }
     }
