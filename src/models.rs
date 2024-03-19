@@ -19,6 +19,7 @@ mod transformers;
 #[derive(Debug, Clone, Copy, EnumIter)]
 pub enum ModelId {
     Mistral7bInstructV02,
+    Mistral7B,
     Zephyr7bBeta,
     StableLm2Zephyr,
 }
@@ -35,6 +36,16 @@ impl ModelId {
                 model_repo: "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
                 model_filename: "mistral-7b-instruct-v0.2.Q4_K_S.gguf",
                 tokenizer_repo: "mistralai/Mistral-7B-Instruct-v0.2",
+                tokenizer_filename: "tokenizer.json",
+            },
+            ModelId::Mistral7B => ModelSpec {
+                model_id: *self,
+                name: "Mistral 7B v0.1",
+                size: 4074411744,
+                cache_dir: "mistral_7b_v01",
+                model_repo: "lmz/candle-mistral",
+                model_filename: "model-q4k.gguf",
+                tokenizer_repo: "mistralai/Mistral-7B-v0.1",
                 tokenizer_filename: "tokenizer.json",
             },
             ModelId::Zephyr7bBeta => ModelSpec {
@@ -70,7 +81,10 @@ impl ModelId {
         match self {
             ModelId::StableLm2Zephyr => Ok(Box::new(qstablelm::QuantizedStableLM::new(params)?)),
             ModelId::Zephyr7bBeta => Ok(Box::new(qzephyr::QuantizedZephyr::new(params)?)),
-            ModelId::Mistral7bInstructV02 => Ok(Box::new(qmistral::QuantizedMistral::new(params)?)),
+            ModelId::Mistral7bInstructV02 => {
+                Ok(Box::new(qmistral::QuantizedMistralInstruct::new(params)?))
+            }
+            ModelId::Mistral7B => Ok(Box::new(qmistral::QuantizedMistral7B::new(params)?)),
         }
     }
 }
@@ -194,8 +208,8 @@ pub fn sample_token(logits: Tensor, tokens: &[u32], params: &ModelParams) -> Res
     let logits_v: Vec<f32> = logits.to_vec1()?;
 
     let mut heap = BinaryHeap::with_capacity(params.top_k);
-    for (idx, v) in logits_v.iter().enumerate() {
-        heap.push((HeapVal(*v), idx));
+    for (token, v) in logits_v.iter().enumerate() {
+        heap.push((HeapVal(*v), token as u32));
         if heap.len() > params.top_k {
             heap.pop();
         }
@@ -203,7 +217,7 @@ pub fn sample_token(logits: Tensor, tokens: &[u32], params: &ModelParams) -> Res
 
     let max_logit = heap
         .iter()
-        .max_by(|(u, _), (v, _)| u.cmp(v))
+        .max_by(|(u, _), (v, _)| v.cmp(u))
         .map(|(l, _)| l.0)
         .unwrap();
 
@@ -220,6 +234,5 @@ pub fn sample_token(logits: Tensor, tokens: &[u32], params: &ModelParams) -> Res
 
     let mut rng = rand::thread_rng();
     let distr = rand::distributions::WeightedIndex::new(softmax)?;
-    let next_token = tokens[distr.sample(&mut rng)];
-    Ok(next_token as u32)
+    Ok(tokens[distr.sample(&mut rng)])
 }
